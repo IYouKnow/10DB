@@ -4,6 +4,7 @@ import AppLayout from './components/dashboard/AppLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
 import SchemaBoard from './pages/SchemaBoard';
+import DatabaseSchemaBoard from './pages/DatabaseSchemaBoard';
 import Tables from './pages/Tables';
 import Credentials from './pages/Credentials';
 import SqlPreview from './pages/SqlPreview';
@@ -22,6 +23,7 @@ const DashboardApp = () => (
       <Route path="/projects/:projectId" element={<AppLayout />}>
         <Route index element={<Navigate to="board" replace />} />
         <Route path="board" element={<SchemaBoard />} />
+        <Route path="database/schema" element={<DatabaseSchemaBoard />} />
         <Route path="tables" element={<Tables />} />
         <Route path="credentials" element={<Credentials />} />
         <Route path="sql" element={<SqlPreview />} />

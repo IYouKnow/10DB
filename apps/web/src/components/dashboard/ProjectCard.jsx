@@ -1,9 +1,10 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { GitBranch, KeyRound, Code2, Trash2, Table2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const statusConfig = {
+  draft: { label: 'Draft', color: 'text-muted-foreground bg-secondary border-border' },
   ready: { label: 'Ready', color: 'text-chart-3 bg-chart-3/10 border-chart-3/20' },
   creating: { label: 'Creating', color: 'text-chart-4 bg-chart-4/10 border-chart-4/20' },
   apply_failed: { label: 'Apply failed', color: 'text-destructive bg-destructive/10 border-destructive/20' },
@@ -37,17 +38,40 @@ function formatTimeAgo(value) {
 }
 
 export default function ProjectCard({ project, onDelete }) {
+  const navigate = useNavigate();
   const status = statusConfig[project.status] || statusConfig.creating;
   const timeAgo = formatTimeAgo(project.updatedAt);
   const projectBasePath = `/projects/${project.id}`;
+  const projectBoardPath = `${projectBasePath}/board`;
+
+  const openProject = () => {
+    navigate(projectBoardPath);
+  };
+
+  const handleCardKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openProject();
+    }
+  };
+
+  const stopCardClick = (event) => {
+    event.stopPropagation();
+  };
 
   return (
-    <div className="group relative flex flex-col p-5 rounded-2xl border border-border bg-card hover:border-primary/20 transition-all duration-200">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={openProject}
+      onKeyDown={handleCardKeyDown}
+      className="group relative flex cursor-pointer flex-col rounded-2xl border border-border bg-card p-5 transition-all duration-200 hover:border-primary/20 focus:outline-none focus:ring-2 focus:ring-ring"
+    >
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-mono font-semibold text-sm text-foreground">{project.name}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5 font-mono">{project.pgDatabaseName}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 font-mono">{project.pgDatabaseName || 'No database added yet'}</p>
         </div>
         <span className={cn('text-[10px] font-medium px-2 py-0.5 rounded-full border', status.color)}>
           {status.label}
@@ -61,17 +85,17 @@ export default function ProjectCard({ project, onDelete }) {
           <span>{project.slug}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-chart-3" />
-          <span>{project.pgHost}:{project.pgPort}</span>
+          <div className={cn('w-1.5 h-1.5 rounded-full', project.pgDatabaseName ? 'bg-chart-3' : 'bg-muted-foreground/40')} />
+          <span>{project.pgDatabaseName ? `${project.pgHost}:${project.pgPort}` : 'Right-click in board to add DB'}</span>
         </div>
       </div>
 
       <p className="text-[10px] text-muted-foreground/60 mb-4">Updated {timeAgo}</p>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 mt-auto">
+      <div className="flex items-center gap-2 mt-auto" onClick={stopCardClick}>
         <Link
-          to={`${projectBasePath}/board`}
+          to={projectBoardPath}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors"
         >
           <GitBranch className="w-3 h-3" />

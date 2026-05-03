@@ -5,6 +5,7 @@ import "time"
 type ProjectStatus string
 
 const (
+	ProjectStatusDraft       ProjectStatus = "draft"
 	ProjectStatusCreating    ProjectStatus = "creating"
 	ProjectStatusReady       ProjectStatus = "ready"
 	ProjectStatusApplyFailed ProjectStatus = "apply_failed"

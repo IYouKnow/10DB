@@ -16,8 +16,8 @@ import (
 
 	"github.com/pedro/10db-launch/apps/server/internal/platform/auth"
 	"github.com/pedro/10db-launch/apps/server/internal/project"
-	"github.com/pedro/10db-launch/apps/server/internal/user"
 	types "github.com/pedro/10db-launch/apps/server/internal/types"
+	"github.com/pedro/10db-launch/apps/server/internal/user"
 )
 
 type Handler struct {
@@ -57,6 +57,9 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Get("/projects", h.listProjects)
 			secure.Post("/projects", h.createProject)
 			secure.Get("/projects/{projectID}", h.getProject)
+			secure.Post("/projects/{projectID}/provision/postgres", h.provisionPostgres)
+			secure.Delete("/projects/{projectID}/provision/postgres", h.removeProvisionedPostgres)
+			secure.Post("/projects/{projectID}/provision/postgres/remove", h.removeProvisionedPostgres)
 			secure.Delete("/projects/{projectID}", h.deleteProject)
 			secure.Post("/projects/{projectID}/reset", h.resetProject)
 			secure.Get("/projects/{projectID}/connection", h.projectConnection)
@@ -228,6 +231,34 @@ func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
 	project, err := h.projects.Get(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		Error(w, http.StatusNotFound, "project_not_found", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, project)
+}
+
+func (h *Handler) provisionPostgres(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	project, err := h.projects.ProvisionPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "provision_postgres_failed", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, project)
+}
+
+func (h *Handler) removeProvisionedPostgres(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	project, err := h.projects.RemoveProvisionedPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "remove_postgres_failed", err.Error(), nil)
 		return
 	}
 	JSON(w, http.StatusOK, project)

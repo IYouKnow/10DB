@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   LayoutGrid, GitBranch, Table2, KeyRound, Code2, Database,
@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button';
 
 const navItems = [
   { label: 'All Projects', icon: LayoutGrid, href: () => '/' },
-  { label: 'Schema Board', icon: GitBranch, href: (projectId) => `/projects/${projectId}/board` },
+  { label: 'Project Board', icon: GitBranch, href: (projectId) => `/projects/${projectId}/board` },
+  { label: 'DB Schema', icon: Table2, href: (projectId) => `/projects/${projectId}/database/schema` },
   { label: 'Tables', icon: Table2, href: (projectId) => `/projects/${projectId}/tables` },
   { label: 'Credentials', icon: KeyRound, href: (projectId) => `/projects/${projectId}/credentials` },
   { label: 'SQL Preview', icon: Code2, href: (projectId) => `/projects/${projectId}/sql` },
@@ -25,9 +26,15 @@ export default function AppLayout() {
   const { projectId } = useParams();
   const [projectOpen, setProjectOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { projects } = useProjects();
+  const { projects, isLoadingProjects } = useProjects();
   const { user, logout } = useAuth();
   const activeProject = projects.find((project) => project.id === projectId) ?? null;
+
+  useEffect(() => {
+    if (!isLoadingProjects && projectId && !activeProject) {
+      navigate('/', { replace: true });
+    }
+  }, [activeProject, isLoadingProjects, navigate, projectId]);
 
   const handleLogout = async () => {
     await logout();

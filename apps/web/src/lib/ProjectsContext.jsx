@@ -29,7 +29,9 @@ async function request(path, options = {}) {
     } catch {
       // Ignore JSON parsing errors and keep the fallback message.
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   if (response.status === 204) {
@@ -64,7 +66,7 @@ export function ProjectsProvider({ children }) {
     } finally {
       setIsLoadingProjects(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (isLoadingAuth) {
@@ -87,6 +89,44 @@ export function ProjectsProvider({ children }) {
     return project;
   }, []);
 
+  const getProject = useCallback(async (projectId) => {
+    return request(`/api/v1/projects/${projectId}`);
+  }, []);
+
+  const provisionPostgres = useCallback(async (projectId) => {
+    const project = await request(`/api/v1/projects/${projectId}/provision/postgres`, {
+      method: 'POST',
+    });
+
+    setProjects((current) => current.map((entry) => (
+      entry.id === project.id ? project : entry
+    )));
+
+    return project;
+  }, []);
+
+  const removeProvisionedPostgres = useCallback(async (projectId) => {
+    let project;
+    try {
+      project = await request(`/api/v1/projects/${projectId}/provision/postgres`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      if (error.status !== 404) {
+        throw error;
+      }
+      project = await request(`/api/v1/projects/${projectId}/provision/postgres/remove`, {
+        method: 'POST',
+      });
+    }
+
+    setProjects((current) => current.map((entry) => (
+      entry.id === project.id ? project : entry
+    )));
+
+    return project;
+  }, []);
+
   const deleteProject = useCallback(async (projectId) => {
     await request(`/api/v1/projects/${projectId}`, {
       method: 'DELETE',
@@ -101,8 +141,11 @@ export function ProjectsProvider({ children }) {
     projectsError,
     loadProjects,
     createProject,
+    getProject,
+    provisionPostgres,
+    removeProvisionedPostgres,
     deleteProject,
-  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, deleteProject]);
+  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, removeProvisionedPostgres, deleteProject]);
 
   return (
     <ProjectsContext.Provider value={value}>

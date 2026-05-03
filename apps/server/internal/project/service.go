@@ -52,9 +52,41 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, input CreatePr
 		return types.Project{}, errors.New("slug must contain lowercase letters, numbers, and hyphens only")
 	}
 
+	now := time.Now().UTC()
+	project := types.Project{
+		ID:                  uuid.NewString(),
+		OwnerUserID:         ownerUserID,
+		Name:                name,
+		Slug:                slug,
+		Description:         strings.TrimSpace(input.Description),
+		Status:              types.ProjectStatusDraft,
+		PGDatabaseName:      "",
+		PGRoleName:          "",
+		PGPasswordEncrypted: "",
+		PGHost:              "",
+		PGPort:              0,
+		PGSSLMode:           "",
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	if err := s.store.CreateProject(ctx, project); err != nil {
+		return types.Project{}, err
+	}
+	return project, nil
+}
+
+func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID string) (types.Project, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
+	if err != nil {
+		return types.Project{}, err
+	}
+	if project.PGDatabaseName != "" {
+		return project, nil
+	}
+
 	suffix := strings.ReplaceAll(uuid.NewString()[:8], "-", "")
-	dbName := fmt.Sprintf("p_%s_%s", strings.ReplaceAll(slug, "-", "_"), suffix)
-	roleName := fmt.Sprintf("u_%s_%s", strings.ReplaceAll(slug, "-", "_"), suffix)
+	dbName := fmt.Sprintf("p_%s_%s", strings.ReplaceAll(project.Slug, "-", "_"), suffix)
+	roleName := fmt.Sprintf("u_%s_%s", strings.ReplaceAll(project.Slug, "-", "_"), suffix)
 	password, err := crypto.GeneratePassword(24)
 	if err != nil {
 		return types.Project{}, err
@@ -64,31 +96,60 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, input CreatePr
 		return types.Project{}, err
 	}
 
-	now := time.Now().UTC()
-	project := types.Project{
-		ID:                  uuid.NewString(),
-		OwnerUserID:         ownerUserID,
-		Name:                name,
-		Slug:                slug,
-		Description:         strings.TrimSpace(input.Description),
-		Status:              types.ProjectStatusCreating,
-		PGDatabaseName:      dbName,
-		PGRoleName:          roleName,
-		PGPasswordEncrypted: encryptedPassword,
-		PGHost:              s.pgConfig.Host,
-		PGPort:              s.pgConfig.Port,
-		PGSSLMode:           s.pgConfig.SSLMode,
-		CreatedAt:           now,
-		UpdatedAt:           now,
-	}
-	if err := s.store.CreateProject(ctx, project); err != nil {
+	project.Status = types.ProjectStatusCreating
+	project.PGDatabaseName = dbName
+	project.PGRoleName = roleName
+	project.PGPasswordEncrypted = encryptedPassword
+	project.PGHost = s.pgConfig.Host
+	project.PGPort = s.pgConfig.Port
+	project.PGSSLMode = s.pgConfig.SSLMode
+	project.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateProject(ctx, project); err != nil {
 		return types.Project{}, err
 	}
+
 	if err := s.postgres.CreateProjectDatabase(ctx, dbName, roleName, password); err != nil {
-		_ = s.store.DeleteProject(ctx, project.ID)
+		project.Status = types.ProjectStatusDraft
+		project.PGDatabaseName = ""
+		project.PGRoleName = ""
+		project.PGPasswordEncrypted = ""
+		project.PGHost = ""
+		project.PGPort = 0
+		project.PGSSLMode = ""
+		project.UpdatedAt = time.Now().UTC()
+		_ = s.store.UpdateProject(ctx, project)
 		return types.Project{}, err
 	}
+
 	project.Status = types.ProjectStatusReady
+	project.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateProject(ctx, project); err != nil {
+		return types.Project{}, err
+	}
+	return project, nil
+}
+
+func (s *Service) RemoveProvisionedPostgres(ctx context.Context, ownerUserID, projectID string) (types.Project, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
+	if err != nil {
+		return types.Project{}, err
+	}
+	if project.PGDatabaseName == "" || project.PGRoleName == "" {
+		return project, nil
+	}
+
+	if err := s.postgres.DropProjectDatabase(ctx, project.PGDatabaseName, project.PGRoleName); err != nil {
+		return types.Project{}, err
+	}
+
+	project.Status = types.ProjectStatusDraft
+	project.PGDatabaseName = ""
+	project.PGRoleName = ""
+	project.PGPasswordEncrypted = ""
+	project.PGHost = ""
+	project.PGPort = 0
+	project.PGSSLMode = ""
+	project.LastAppliedRevisionID = nil
 	project.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateProject(ctx, project); err != nil {
 		return types.Project{}, err
@@ -100,6 +161,9 @@ func (s *Service) Connection(ctx context.Context, ownerUserID, projectID string)
 	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.ProjectConnection{}, err
+	}
+	if project.PGDatabaseName == "" {
+		return types.ProjectConnection{}, errors.New("project does not have a provisioned database yet")
 	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
@@ -173,6 +237,9 @@ func (s *Service) Apply(ctx context.Context, ownerUserID, projectID string) (typ
 	if err != nil {
 		return types.ApplyRun{}, err
 	}
+	if project.PGDatabaseName == "" {
+		return types.ApplyRun{}, errors.New("add a PostgreSQL database from the schema board before applying schema")
+	}
 	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID)
 	if err != nil {
 		return types.ApplyRun{}, err
@@ -231,6 +298,9 @@ func (s *Service) Reset(ctx context.Context, ownerUserID, projectID string) erro
 	if err != nil {
 		return err
 	}
+	if project.PGDatabaseName == "" {
+		return errors.New("project does not have a provisioned database yet")
+	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
 		return err
@@ -243,8 +313,10 @@ func (s *Service) Delete(ctx context.Context, ownerUserID, projectID string) err
 	if err != nil {
 		return err
 	}
-	if err := s.postgres.DropProjectDatabase(ctx, project.PGDatabaseName, project.PGRoleName); err != nil {
-		return err
+	if project.PGDatabaseName != "" && project.PGRoleName != "" {
+		if err := s.postgres.DropProjectDatabase(ctx, project.PGDatabaseName, project.PGRoleName); err != nil {
+			return err
+		}
 	}
 	return s.store.DeleteProject(ctx, project.ID)
 }
@@ -253,6 +325,9 @@ func (s *Service) ListTables(ctx context.Context, ownerUserID, projectID string)
 	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return nil, err
+	}
+	if project.PGDatabaseName == "" {
+		return nil, errors.New("project does not have a provisioned database yet")
 	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
@@ -266,6 +341,9 @@ func (s *Service) ListColumns(ctx context.Context, ownerUserID, projectID, table
 	if err != nil {
 		return nil, err
 	}
+	if project.PGDatabaseName == "" {
+		return nil, errors.New("project does not have a provisioned database yet")
+	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
 		return nil, err
@@ -277,6 +355,9 @@ func (s *Service) ListRows(ctx context.Context, ownerUserID, projectID, tableNam
 	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.TableRows{}, err
+	}
+	if project.PGDatabaseName == "" {
+		return types.TableRows{}, errors.New("project does not have a provisioned database yet")
 	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {

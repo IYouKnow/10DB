@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Database, LoaderCircle } from 'lucide-react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export default function AuthPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isAuthenticated, isLoadingAuth, login, register } = useAuth();
   const [mode, setMode] = useState('login');
   const [name, setName] = useState('');
@@ -16,8 +17,7 @@ export default function AuthPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isLoadingAuth && isAuthenticated) {
-    const destination = location.state?.from?.pathname || '/';
-    return <Navigate to={destination} replace />;
+    return <Navigate to="/" replace />;
   }
 
   const submit = async (event) => {
@@ -28,8 +28,10 @@ export default function AuthPage() {
     try {
       if (mode === 'login') {
         await login(email, password);
+        navigate(location.state?.from?.pathname || '/', { replace: true });
       } else {
         await register(name, email, password);
+        navigate('/', { replace: true });
       }
     } catch (submitError) {
       setError(submitError.message || 'Unable to continue');

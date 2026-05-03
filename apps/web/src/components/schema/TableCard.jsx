@@ -3,7 +3,7 @@ import React from 'react';
 import { Key, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export default function TableCard({ table, selected, onSelect, onColumnSelect, selectedColumn, style, onMouseDown }) {
+export default function TableCard({ table, selected, onSelect, onColumnSelect, selectedColumn, style, onMouseDown, onContextMenu }) {
   return (
     <div
       style={style}
@@ -12,6 +12,10 @@ export default function TableCard({ table, selected, onSelect, onColumnSelect, s
         selected ? 'border-primary/60 shadow-primary/10' : 'border-border hover:border-border/80'
       )}
       onMouseDown={onMouseDown}
+      onContextMenu={(e) => {
+        e.stopPropagation();
+        onContextMenu?.(e, table.id);
+      }}
       onClick={(e) => { e.stopPropagation(); onSelect(table.id); }}
     >
       {/* Table header */}
