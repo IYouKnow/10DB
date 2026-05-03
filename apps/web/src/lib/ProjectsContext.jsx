@@ -25,7 +25,13 @@ async function request(path, options = {}) {
     let message = 'Request failed';
     try {
       const body = await response.json();
-      message = body?.message || body?.error?.message || message;
+      message = body?.message || body?.error || body?.error?.message || message;
+      if (body?.details && typeof body.details === 'object') {
+        const firstDetail = Object.values(body.details).find((value) => typeof value === 'string');
+        if (firstDetail) {
+          message = String(firstDetail);
+        }
+      }
     } catch {
       // Ignore JSON parsing errors and keep the fallback message.
     }
@@ -93,9 +99,10 @@ export function ProjectsProvider({ children }) {
     return request(`/api/v1/projects/${projectId}`);
   }, []);
 
-  const provisionPostgres = useCallback(async (projectId) => {
+  const provisionPostgres = useCallback(async (projectId, input = {}) => {
     const project = await request(`/api/v1/projects/${projectId}/databases/postgres`, {
       method: 'POST',
+      body: JSON.stringify(input),
     });
 
     setProjects((current) => current.map((entry) => (
@@ -103,6 +110,47 @@ export function ProjectsProvider({ children }) {
     )));
 
     return project;
+  }, []);
+
+  const updateProjectDatabase = useCallback(async (projectId, databaseId, input) => {
+    const project = await request(`/api/v1/projects/${projectId}/databases/${databaseId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+
+    setProjects((current) => current.map((entry) => (
+      entry.id === project.id ? project : entry
+    )));
+
+    return project;
+  }, []);
+
+  const getDatabaseSchema = useCallback(async (projectId, databaseId) => {
+    return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema`);
+  }, []);
+
+  const saveDatabaseSchema = useCallback(async (projectId, databaseId, blueprint) => {
+    return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema`, {
+      method: 'PUT',
+      body: JSON.stringify(blueprint),
+    });
+  }, []);
+
+  const listDatabaseTables = useCallback(async (projectId, databaseId) => {
+    const data = await request(`/api/v1/projects/${projectId}/databases/${databaseId}/tables`);
+    return data.tables ?? [];
+  }, []);
+
+  const applyDatabaseTable = useCallback(async (projectId, databaseId, tableId) => {
+    return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema/tables/${tableId}/apply`, {
+      method: 'POST',
+    });
+  }, []);
+
+  const deleteDatabaseTable = useCallback(async (projectId, databaseId, tableId) => {
+    return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema/tables/${tableId}`, {
+      method: 'DELETE',
+    });
   }, []);
 
   const removeProvisionedPostgres = useCallback(async (projectId, databaseId) => {
@@ -133,9 +181,15 @@ export function ProjectsProvider({ children }) {
     createProject,
     getProject,
     provisionPostgres,
+    updateProjectDatabase,
+    getDatabaseSchema,
+    saveDatabaseSchema,
+    listDatabaseTables,
+    applyDatabaseTable,
+    deleteDatabaseTable,
     removeProvisionedPostgres,
     deleteProject,
-  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, removeProvisionedPostgres, deleteProject]);
+  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, updateProjectDatabase, getDatabaseSchema, saveDatabaseSchema, listDatabaseTables, applyDatabaseTable, deleteDatabaseTable, removeProvisionedPostgres, deleteProject]);
 
   return (
     <ProjectsContext.Provider value={value}>

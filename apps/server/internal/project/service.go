@@ -32,6 +32,14 @@ type CreateProjectInput struct {
 	Description string `json:"description"`
 }
 
+type ProvisionPostgresInput struct {
+	Name string `json:"name"`
+}
+
+type UpdateProjectDatabaseInput struct {
+	Name string `json:"name"`
+}
+
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 const (
@@ -83,7 +91,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, input CreatePr
 	return project, nil
 }
 
-func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID string) (types.Project, error) {
+func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID string, input ProvisionPostgresInput) (types.Project, error) {
 	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.Project{}, err
@@ -104,12 +112,16 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	index := len(project.Databases)
 	column := index % databasesPerRow
 	row := index / databasesPerRow
+	displayName := strings.TrimSpace(input.Name)
+	if displayName == "" {
+		displayName = fmt.Sprintf("PostgreSQL Database %d", index+1)
+	}
 	now := time.Now().UTC()
 	database := types.ProjectDatabase{
 		ID:                  uuid.NewString(),
 		ProjectID:           project.ID,
 		Engine:              "postgresql",
-		Name:                fmt.Sprintf("PostgreSQL Database %d", index+1),
+		Name:                displayName,
 		Status:              string(types.ProjectStatusCreating),
 		PGDatabaseName:      dbName,
 		PGRoleName:          roleName,
@@ -150,6 +162,31 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	if err := s.store.UpdateProject(ctx, project); err != nil {
 		return types.Project{}, err
 	}
+	return s.store.GetProject(ctx, ownerUserID, projectID)
+}
+
+func (s *Service) UpdateProjectDatabase(ctx context.Context, ownerUserID, projectID, databaseID string, input UpdateProjectDatabaseInput) (types.Project, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
+	if err != nil {
+		return types.Project{}, err
+	}
+
+	database, err := s.store.GetProjectDatabase(ctx, project.ID, databaseID)
+	if err != nil {
+		return types.Project{}, err
+	}
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return types.Project{}, errors.New("database name is required")
+	}
+
+	database.Name = name
+	database.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateProjectDatabase(ctx, database); err != nil {
+		return types.Project{}, err
+	}
+
 	return s.store.GetProject(ctx, ownerUserID, projectID)
 }
 
@@ -201,11 +238,14 @@ func (s *Service) Connection(ctx context.Context, ownerUserID, projectID string)
 	return postgres.BuildConnection(project, password), nil
 }
 
-func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
+func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID, databaseID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
 	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
 		return types.SchemaRevision{}, nil, err
 	}
-	blueprint = Normalize(blueprint, projectID)
+	if _, err := s.store.GetProjectDatabase(ctx, projectID, databaseID); err != nil {
+		return types.SchemaRevision{}, nil, err
+	}
+	blueprint = Normalize(blueprint, projectID, databaseID)
 	errs := Validate(blueprint)
 	if len(errs) > 0 {
 		return types.SchemaRevision{}, errs, nil
@@ -222,31 +262,40 @@ func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID string,
 	return revision, nil, err
 }
 
-func (s *Service) LatestSchema(ctx context.Context, ownerUserID, projectID string) (types.SchemaRevision, error) {
+func (s *Service) LatestSchema(ctx context.Context, ownerUserID, projectID, databaseID string) (types.SchemaRevision, error) {
 	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
 		return types.SchemaRevision{}, err
 	}
-	return s.store.GetLatestSchemaRevision(ctx, projectID)
+	if _, err := s.store.GetProjectDatabase(ctx, projectID, databaseID); err != nil {
+		return types.SchemaRevision{}, err
+	}
+	return s.store.GetLatestSchemaRevision(ctx, projectID, databaseID)
 }
 
-func (s *Service) Revisions(ctx context.Context, ownerUserID, projectID string) ([]types.SchemaRevision, error) {
+func (s *Service) Revisions(ctx context.Context, ownerUserID, projectID, databaseID string) ([]types.SchemaRevision, error) {
 	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
 		return nil, err
 	}
-	return s.store.ListSchemaRevisions(ctx, projectID)
+	if _, err := s.store.GetProjectDatabase(ctx, projectID, databaseID); err != nil {
+		return nil, err
+	}
+	return s.store.ListSchemaRevisions(ctx, projectID, databaseID)
 }
 
-func (s *Service) ValidateBlueprint(_ context.Context, projectID string, blueprint types.SchemaBlueprint) (types.SchemaBlueprint, map[string]string) {
-	blueprint = Normalize(blueprint, projectID)
+func (s *Service) ValidateBlueprint(_ context.Context, projectID, databaseID string, blueprint types.SchemaBlueprint) (types.SchemaBlueprint, map[string]string) {
+	blueprint = Normalize(blueprint, projectID, databaseID)
 	return blueprint, Validate(blueprint)
 }
 
-func (s *Service) PreviewSQL(ctx context.Context, ownerUserID, projectID string, blueprint *types.SchemaBlueprint) (string, map[string]string, error) {
+func (s *Service) PreviewSQL(ctx context.Context, ownerUserID, projectID, databaseID string, blueprint *types.SchemaBlueprint) (string, map[string]string, error) {
 	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
 		return "", nil, err
 	}
+	if _, err := s.store.GetProjectDatabase(ctx, projectID, databaseID); err != nil {
+		return "", nil, err
+	}
 	if blueprint != nil {
-		normalized := Normalize(*blueprint, projectID)
+		normalized := Normalize(*blueprint, projectID, databaseID)
 		errs := Validate(normalized)
 		if len(errs) > 0 {
 			return "", errs, nil
@@ -254,35 +303,21 @@ func (s *Service) PreviewSQL(ctx context.Context, ownerUserID, projectID string,
 		sql, err := Generate(normalized)
 		return sql, nil, err
 	}
-	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID)
+	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID, databaseID)
 	if err != nil {
 		return "", nil, err
 	}
 	return revision.GeneratedSQL, nil, nil
 }
 
-func (s *Service) Apply(ctx context.Context, ownerUserID, projectID string) (types.ApplyRun, error) {
-	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
+func (s *Service) Apply(ctx context.Context, ownerUserID, projectID, databaseID string) (types.ApplyRun, error) {
+	database, projectConn, password, err := s.loadDatabaseConnection(ctx, ownerUserID, projectID, databaseID)
 	if err != nil {
 		return types.ApplyRun{}, err
 	}
-	if project.PGDatabaseName == "" {
-		return types.ApplyRun{}, errors.New("add a PostgreSQL database from the schema board before applying schema")
-	}
-	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID)
+	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID, databaseID)
 	if err != nil {
 		return types.ApplyRun{}, err
-	}
-	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
-	if err != nil {
-		return types.ApplyRun{}, err
-	}
-	tableCount, err := s.postgres.PublicTableCount(ctx, project, password)
-	if err != nil {
-		return types.ApplyRun{}, err
-	}
-	if tableCount > 0 {
-		return types.ApplyRun{}, errors.New("schema apply only supports empty project schemas in v1; reset the project first")
 	}
 	now := time.Now().UTC()
 	run := types.ApplyRun{
@@ -296,30 +331,123 @@ func (s *Service) Apply(ctx context.Context, ownerUserID, projectID string) (typ
 	if err := s.store.CreateApplyRun(ctx, run); err != nil {
 		return types.ApplyRun{}, err
 	}
-	if err := s.postgres.ApplySQL(ctx, project, password, revision.GeneratedSQL); err != nil {
+	if err := s.postgres.ApplySQL(ctx, projectConn, password, revision.GeneratedSQL); err != nil {
 		finished := time.Now().UTC()
 		run.Status = "failed"
 		run.ErrorMessage = err.Error()
 		run.FinishedAt = &finished
-		project.Status = types.ProjectStatusApplyFailed
-		project.UpdatedAt = finished
-		_ = s.store.UpdateProject(ctx, project)
+		database.Status = string(types.ProjectStatusApplyFailed)
+		database.UpdatedAt = finished
+		_ = s.store.UpdateProjectDatabase(ctx, database)
 		_ = s.store.UpdateApplyRun(ctx, run)
 		return run, err
 	}
 	finished := time.Now().UTC()
 	run.Status = "success"
 	run.FinishedAt = &finished
-	project.Status = types.ProjectStatusReady
-	project.LastAppliedRevisionID = &revision.ID
-	project.UpdatedAt = finished
-	if err := s.store.UpdateProject(ctx, project); err != nil {
+	database.Status = string(types.ProjectStatusReady)
+	database.UpdatedAt = finished
+	if err := s.store.UpdateProjectDatabase(ctx, database); err != nil {
 		return types.ApplyRun{}, err
 	}
 	if err := s.store.UpdateApplyRun(ctx, run); err != nil {
 		return types.ApplyRun{}, err
 	}
 	return run, nil
+}
+
+func (s *Service) ApplyTable(ctx context.Context, ownerUserID, projectID, databaseID, tableID string) error {
+	database, projectConn, password, err := s.loadDatabaseConnection(ctx, ownerUserID, projectID, databaseID)
+	if err != nil {
+		return err
+	}
+	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID, databaseID)
+	if err != nil {
+		return err
+	}
+
+	var target *types.TableBlueprint
+	for index := range revision.Blueprint.Tables {
+		if revision.Blueprint.Tables[index].ID == tableID {
+			target = &revision.Blueprint.Tables[index]
+			break
+		}
+	}
+	if target == nil {
+		return errors.New("table draft not found")
+	}
+
+	sql, err := Generate(types.SchemaBlueprint{
+		Version:    1,
+		ProjectID:  projectID,
+		DatabaseID: databaseID,
+		Tables:     []types.TableBlueprint{*target},
+	})
+	if err != nil {
+		return err
+	}
+
+	database.Status = string(types.ProjectStatusReady)
+	database.UpdatedAt = time.Now().UTC()
+	if err := s.postgres.ApplySQL(ctx, projectConn, password, sql); err != nil {
+		return err
+	}
+	return s.store.UpdateProjectDatabase(ctx, database)
+}
+
+func (s *Service) DeleteTable(ctx context.Context, ownerUserID, projectID, databaseID, tableID string) error {
+	_, projectConn, password, err := s.loadDatabaseConnection(ctx, ownerUserID, projectID, databaseID)
+	if err != nil {
+		return err
+	}
+	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID, databaseID)
+	if err != nil {
+		return err
+	}
+
+	var tableName string
+	for _, table := range revision.Blueprint.Tables {
+		if table.ID == tableID {
+			tableName = table.Name
+			break
+		}
+	}
+	if tableName == "" {
+		return errors.New("table draft not found")
+	}
+
+	return s.postgres.DropTable(ctx, projectConn, password, tableName)
+}
+
+func (s *Service) ListDatabaseTables(ctx context.Context, ownerUserID, projectID, databaseID string) ([]types.TableInfo, error) {
+	_, projectConn, password, err := s.loadDatabaseConnection(ctx, ownerUserID, projectID, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	return s.postgres.ListTables(ctx, projectConn, password)
+}
+
+func (s *Service) loadDatabaseConnection(ctx context.Context, ownerUserID, projectID, databaseID string) (types.ProjectDatabase, types.Project, string, error) {
+	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
+		return types.ProjectDatabase{}, types.Project{}, "", err
+	}
+	database, err := s.store.GetProjectDatabase(ctx, projectID, databaseID)
+	if err != nil {
+		return types.ProjectDatabase{}, types.Project{}, "", err
+	}
+	password, err := s.crypto.Decrypt(database.PGPasswordEncrypted)
+	if err != nil {
+		return types.ProjectDatabase{}, types.Project{}, "", err
+	}
+	projectConn := types.Project{
+		ID:             projectID,
+		PGDatabaseName: database.PGDatabaseName,
+		PGRoleName:     database.PGRoleName,
+		PGHost:         database.PGHost,
+		PGPort:         database.PGPort,
+		PGSSLMode:      database.PGSSLMode,
+	}
+	return database, projectConn, password, nil
 }
 
 func (s *Service) Reset(ctx context.Context, ownerUserID, projectID string) error {

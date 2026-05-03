@@ -103,6 +103,16 @@ func (s *Service) ApplySQL(ctx context.Context, project types.Project, password,
 	return err
 }
 
+func (s *Service) DropTable(ctx context.Context, project types.Project, password, tableName string) error {
+	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+	_, err = conn.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", quoteIdent(tableName)))
+	return err
+}
+
 func (s *Service) PublicTableCount(ctx context.Context, project types.Project, password string) (int, error) {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {

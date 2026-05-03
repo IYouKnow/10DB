@@ -47,6 +47,13 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		}
 	}
 
+	if err := ensureColumn(ctx, s.db, "schema_revisions", "database_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_schema_revisions_database_id ON schema_revisions(database_id, version_number DESC)`); err != nil {
+		return err
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, status, pg_database_name, pg_role_name, pg_password_encrypted, pg_host, pg_port, pg_ssl_mode, created_at, updated_at
 		FROM projects
@@ -311,10 +318,11 @@ func (s *Store) DeleteProjectDatabase(ctx context.Context, projectID, databaseID
 
 func (s *Store) SaveSchemaRevision(ctx context.Context, projectID string, blueprint types.SchemaBlueprint, blueprintHash, generatedSQL string) (types.SchemaRevision, error) {
 	var currentVersion int
-	_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_number), 0) FROM schema_revisions WHERE project_id = ?`, projectID).Scan(&currentVersion)
+	_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_number), 0) FROM schema_revisions WHERE project_id = ? AND database_id = ?`, projectID, blueprint.DatabaseID).Scan(&currentVersion)
 	revision := types.SchemaRevision{
 		ID:            uuid.NewString(),
 		ProjectID:     projectID,
+		DatabaseID:    blueprint.DatabaseID,
 		VersionNumber: currentVersion + 1,
 		Blueprint:     blueprint,
 		BlueprintHash: blueprintHash,
@@ -326,30 +334,30 @@ func (s *Store) SaveSchemaRevision(ctx context.Context, projectID string, bluepr
 		return types.SchemaRevision{}, err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO schema_revisions (id, project_id, version_number, blueprint_json, blueprint_hash, generated_sql, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, revision.ID, revision.ProjectID, revision.VersionNumber, string(raw), revision.BlueprintHash, revision.GeneratedSQL, revision.CreatedAt.Format(time.RFC3339Nano))
+		INSERT INTO schema_revisions (id, project_id, database_id, version_number, blueprint_json, blueprint_hash, generated_sql, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, revision.ID, revision.ProjectID, revision.DatabaseID, revision.VersionNumber, string(raw), revision.BlueprintHash, revision.GeneratedSQL, revision.CreatedAt.Format(time.RFC3339Nano))
 	return revision, err
 }
 
-func (s *Store) GetLatestSchemaRevision(ctx context.Context, projectID string) (types.SchemaRevision, error) {
+func (s *Store) GetLatestSchemaRevision(ctx context.Context, projectID, databaseID string) (types.SchemaRevision, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, version_number, blueprint_json, blueprint_hash, generated_sql, created_at
+		SELECT id, project_id, database_id, version_number, blueprint_json, blueprint_hash, generated_sql, created_at
 		FROM schema_revisions
-		WHERE project_id = ?
+		WHERE project_id = ? AND database_id = ?
 		ORDER BY version_number DESC
 		LIMIT 1
-	`, projectID)
+	`, projectID, databaseID)
 	return scanRevision(row)
 }
 
-func (s *Store) ListSchemaRevisions(ctx context.Context, projectID string) ([]types.SchemaRevision, error) {
+func (s *Store) ListSchemaRevisions(ctx context.Context, projectID, databaseID string) ([]types.SchemaRevision, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, version_number, blueprint_json, blueprint_hash, generated_sql, created_at
+		SELECT id, project_id, database_id, version_number, blueprint_json, blueprint_hash, generated_sql, created_at
 		FROM schema_revisions
-		WHERE project_id = ?
+		WHERE project_id = ? AND database_id = ?
 		ORDER BY version_number DESC
-	`, projectID)
+	`, projectID, databaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +454,7 @@ func scanRevision(scanner interface{ Scan(dest ...any) error }) (types.SchemaRev
 	var revision types.SchemaRevision
 	var raw string
 	var createdAt string
-	if err := scanner.Scan(&revision.ID, &revision.ProjectID, &revision.VersionNumber, &raw, &revision.BlueprintHash, &revision.GeneratedSQL, &createdAt); err != nil {
+	if err := scanner.Scan(&revision.ID, &revision.ProjectID, &revision.DatabaseID, &revision.VersionNumber, &raw, &revision.BlueprintHash, &revision.GeneratedSQL, &createdAt); err != nil {
 		return types.SchemaRevision{}, err
 	}
 	if err := json.Unmarshal([]byte(raw), &revision.Blueprint); err != nil {
@@ -454,6 +462,37 @@ func scanRevision(scanner interface{ Scan(dest ...any) error }) (types.SchemaRev
 	}
 	revision.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	return revision, nil
+}
+
+func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, columnDef string) error {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnDef))
+	return err
 }
 
 func timePointerString(value *time.Time) any {

@@ -3,7 +3,7 @@ import React from 'react';
 import { Key, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export default function TableCard({ table, selected, onSelect, onColumnSelect, selectedColumn, style, onMouseDown, onContextMenu }) {
+export default function TableCard({ table, selected, onSelect, onColumnSelect, selectedColumn, style, onMouseDown, onContextMenu, onApply }) {
   return (
     <div
       style={style}
@@ -25,7 +25,27 @@ export default function TableCard({ table, selected, onSelect, onColumnSelect, s
       )}>
         <div className={cn('w-2 h-2 rounded-full', selected ? 'bg-primary' : 'bg-primary/50')} />
         <span className="font-mono text-xs font-semibold text-foreground">{table.name}</span>
-        <span className="ml-auto text-[10px] text-muted-foreground/50 font-mono">{table.columns.length} cols</span>
+        <span className={cn(
+          'ml-auto rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.08em]',
+          table.status === 'applied'
+            ? 'bg-emerald-500/12 text-emerald-300'
+            : 'bg-amber-500/12 text-amber-300'
+        )}>
+          {table.status === 'applied' ? 'Applied' : 'Draft'}
+        </span>
+        {table.status !== 'applied' && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onApply?.(table.id);
+            }}
+            className="rounded-md border border-primary/25 px-1.5 py-0.5 text-[9px] font-semibold text-primary transition-colors hover:bg-primary/10"
+          >
+            {table.isApplying ? 'Applying...' : 'Apply'}
+          </button>
+        )}
+        <span className="text-[10px] text-muted-foreground/50 font-mono">{table.columns.length} cols</span>
       </div>
 
       {/* Columns */}

@@ -72,6 +72,7 @@ type ProjectConnection struct {
 type SchemaRevision struct {
 	ID            string          `json:"id"`
 	ProjectID     string          `json:"projectId"`
+	DatabaseID    string          `json:"databaseId"`
 	VersionNumber int             `json:"versionNumber"`
 	Blueprint     SchemaBlueprint `json:"blueprint"`
 	BlueprintHash string          `json:"blueprintHash"`
@@ -93,6 +94,7 @@ type ApplyRun struct {
 type SchemaBlueprint struct {
 	Version   int              `json:"version"`
 	ProjectID string           `json:"projectId"`
+	DatabaseID string          `json:"databaseId"`
 	Tables    []TableBlueprint `json:"tables"`
 }
 

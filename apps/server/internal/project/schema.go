@@ -27,9 +27,10 @@ var supportedTypes = map[string]struct{}{
 	"jsonb":     {},
 }
 
-func Normalize(bp types.SchemaBlueprint, projectID string) types.SchemaBlueprint {
+func Normalize(bp types.SchemaBlueprint, projectID, databaseID string) types.SchemaBlueprint {
 	bp.Version = 1
 	bp.ProjectID = projectID
+	bp.DatabaseID = databaseID
 	if bp.Tables == nil {
 		bp.Tables = []types.TableBlueprint{}
 	}

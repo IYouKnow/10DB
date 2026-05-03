@@ -58,6 +58,16 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Post("/projects", h.createProject)
 			secure.Get("/projects/{projectID}", h.getProject)
 			secure.Post("/projects/{projectID}/databases/postgres", h.provisionPostgres)
+			secure.Patch("/projects/{projectID}/databases/{databaseID}", h.updateProjectDatabase)
+			secure.Get("/projects/{projectID}/databases/{databaseID}/schema", h.getSchema)
+			secure.Put("/projects/{projectID}/databases/{databaseID}/schema", h.putSchema)
+			secure.Post("/projects/{projectID}/databases/{databaseID}/schema/validate", h.validateSchema)
+			secure.Post("/projects/{projectID}/databases/{databaseID}/schema/sql-preview", h.sqlPreview)
+			secure.Post("/projects/{projectID}/databases/{databaseID}/schema/apply", h.applySchema)
+			secure.Post("/projects/{projectID}/databases/{databaseID}/schema/tables/{tableID}/apply", h.applySchemaTable)
+			secure.Delete("/projects/{projectID}/databases/{databaseID}/schema/tables/{tableID}", h.deleteSchemaTable)
+			secure.Get("/projects/{projectID}/databases/{databaseID}/schema/revisions", h.schemaRevisions)
+			secure.Get("/projects/{projectID}/databases/{databaseID}/tables", h.listTables)
 			secure.Delete("/projects/{projectID}/databases/{databaseID}", h.removeProvisionedPostgres)
 			secure.Delete("/projects/{projectID}", h.deleteProject)
 			secure.Post("/projects/{projectID}/reset", h.resetProject)
@@ -241,9 +251,35 @@ func (h *Handler) provisionPostgres(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	project, err := h.projects.ProvisionPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	var body project.ProvisionPostgresInput
+	if r.ContentLength > 0 {
+		if err := Decode(r, &body); err != nil {
+			Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+			return
+		}
+	}
+	project, err := h.projects.ProvisionPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"), body)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "provision_postgres_failed", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, project)
+}
+
+func (h *Handler) updateProjectDatabase(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	var body project.UpdateProjectDatabaseInput
+	if err := Decode(r, &body); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+		return
+	}
+	project, err := h.projects.UpdateProjectDatabase(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"), body)
+	if err != nil {
+		Error(w, http.StatusBadRequest, "update_database_failed", err.Error(), nil)
 		return
 	}
 	JSON(w, http.StatusOK, project)
@@ -309,9 +345,14 @@ func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	revision, err := h.projects.LatestSchema(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
 	if err != nil {
-		JSON(w, http.StatusOK, types.SchemaBlueprint{Version: 1, ProjectID: chi.URLParam(r, "projectID"), Tables: []types.TableBlueprint{}})
+		JSON(w, http.StatusOK, types.SchemaBlueprint{Version: 1, ProjectID: chi.URLParam(r, "projectID"), DatabaseID: "", Tables: []types.TableBlueprint{}})
+		return
+	}
+	revision, err := h.projects.LatestSchema(r.Context(), session.UserID, chi.URLParam(r, "projectID"), databaseID)
+	if err != nil {
+		JSON(w, http.StatusOK, types.SchemaBlueprint{Version: 1, ProjectID: chi.URLParam(r, "projectID"), DatabaseID: databaseID, Tables: []types.TableBlueprint{}})
 		return
 	}
 	JSON(w, http.StatusOK, revision)
@@ -328,7 +369,12 @@ func (h *Handler) putSchema(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	revision, validationErrors, err := h.projects.SaveSchema(r.Context(), session.UserID, chi.URLParam(r, "projectID"), blueprint)
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "database_not_found", err.Error(), nil)
+		return
+	}
+	revision, validationErrors, err := h.projects.SaveSchema(r.Context(), session.UserID, chi.URLParam(r, "projectID"), databaseID, blueprint)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "save_schema_failed", err.Error(), nil)
 		return
@@ -355,7 +401,12 @@ func (h *Handler) validateSchema(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusNotFound, "project_not_found", err.Error(), nil)
 		return
 	}
-	normalized, errs := h.projects.ValidateBlueprint(r.Context(), chi.URLParam(r, "projectID"), blueprint)
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "database_not_found", err.Error(), nil)
+		return
+	}
+	normalized, errs := h.projects.ValidateBlueprint(r.Context(), chi.URLParam(r, "projectID"), databaseID, blueprint)
 	JSON(w, http.StatusOK, map[string]any{"blueprint": normalized, "errors": errs, "valid": len(errs) == 0})
 }
 
@@ -372,7 +423,12 @@ func (h *Handler) sqlPreview(w http.ResponseWriter, r *http.Request) {
 			blueprint = &body
 		}
 	}
-	sql, errs, err := h.projects.PreviewSQL(r.Context(), session.UserID, chi.URLParam(r, "projectID"), blueprint)
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "database_not_found", err.Error(), nil)
+		return
+	}
+	sql, errs, err := h.projects.PreviewSQL(r.Context(), session.UserID, chi.URLParam(r, "projectID"), databaseID, blueprint)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "sql_preview_failed", err.Error(), nil)
 		return
@@ -390,12 +446,43 @@ func (h *Handler) applySchema(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	run, err := h.projects.Apply(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "database_not_found", err.Error(), nil)
+		return
+	}
+	run, err := h.projects.Apply(r.Context(), session.UserID, chi.URLParam(r, "projectID"), databaseID)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "apply_failed", err.Error(), run)
 		return
 	}
 	JSON(w, http.StatusOK, run)
+}
+
+func (h *Handler) applySchemaTable(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	if err := h.projects.ApplyTable(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"), chi.URLParam(r, "tableID")); err != nil {
+		Error(w, http.StatusBadRequest, "apply_table_failed", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) deleteSchemaTable(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	if err := h.projects.DeleteTable(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"), chi.URLParam(r, "tableID")); err != nil {
+		Error(w, http.StatusBadRequest, "delete_table_failed", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) schemaRevisions(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +491,12 @@ func (h *Handler) schemaRevisions(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	revisions, err := h.projects.Revisions(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "database_not_found", err.Error(), nil)
+		return
+	}
+	revisions, err := h.projects.Revisions(r.Context(), session.UserID, chi.URLParam(r, "projectID"), databaseID)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "list_revisions_failed", err.Error(), nil)
 		return
@@ -418,12 +510,31 @@ func (h *Handler) listTables(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	tables, err := h.projects.ListTables(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	databaseID, err := h.resolveDatabaseID(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "database_not_found", err.Error(), nil)
+		return
+	}
+	tables, err := h.projects.ListDatabaseTables(r.Context(), session.UserID, chi.URLParam(r, "projectID"), databaseID)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "list_tables_failed", err.Error(), nil)
 		return
 	}
 	JSON(w, http.StatusOK, map[string]any{"tables": tables})
+}
+
+func (h *Handler) resolveDatabaseID(ctx context.Context, userID, projectID, databaseID string) (string, error) {
+	if databaseID != "" {
+		return databaseID, nil
+	}
+	project, err := h.projects.Get(ctx, userID, projectID)
+	if err != nil {
+		return "", err
+	}
+	if len(project.Databases) == 0 {
+		return "", fmt.Errorf("project does not have a provisioned database yet")
+	}
+	return project.Databases[0].ID, nil
 }
 
 func (h *Handler) listColumns(w http.ResponseWriter, r *http.Request) {
