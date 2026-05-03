@@ -13,6 +13,7 @@ const (
 
 type Project struct {
 	ID                    string        `json:"id"`
+	OwnerUserID           string        `json:"-"`
 	Name                  string        `json:"name"`
 	Slug                  string        `json:"slug"`
 	Description           string        `json:"description"`
@@ -26,6 +27,15 @@ type Project struct {
 	LastAppliedRevisionID *string       `json:"lastAppliedRevisionId,omitempty"`
 	CreatedAt             time.Time     `json:"createdAt"`
 	UpdatedAt             time.Time     `json:"updatedAt"`
+}
+
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type ProjectConnection struct {

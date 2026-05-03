@@ -16,6 +16,7 @@ import (
 	"github.com/pedro/10db-launch/apps/server/internal/platform/db"
 	"github.com/pedro/10db-launch/apps/server/internal/platform/postgres"
 	"github.com/pedro/10db-launch/apps/server/internal/project"
+	"github.com/pedro/10db-launch/apps/server/internal/user"
 	"github.com/pedro/10db-launch/apps/server/internal/web"
 )
 
@@ -59,6 +60,11 @@ func main() {
 	defer pgService.Close()
 
 	store := project.NewStore(sqliteDB)
+	userStore := user.NewStore(sqliteDB)
+	if err := userStore.EnsureSchema(ctx); err != nil {
+		log.Fatalf("ensure user schema: %v", err)
+	}
+	userService := user.New(userStore)
 	cryptoService := crypto.New(cfg.MasterKey)
 	projectService := project.New(store, pgService, cryptoService, postgres.AdminConfig{
 		Host:     cfg.PGAdminHost,
@@ -68,9 +74,9 @@ func main() {
 		Password: cfg.PGAdminPassword,
 		SSLMode:  cfg.PGSSLMode,
 	})
-	authService := auth.New(cfg.AdminUsername, cfg.AdminPassword, cfg.MasterKey, cfg.AppBaseURL, cfg.SessionTTL)
+	authService := auth.New(cfg.MasterKey, cfg.AppBaseURL, cfg.SessionTTL)
 
-	handler := web.New(authService, projectService, cfg.AllowedOrigins)
+	handler := web.New(authService, userService, projectService, cfg.AllowedOrigins)
 	server := &http.Server{
 		Addr:    cfg.AppAddr,
 		Handler: handler.Router(filepath.Join(".", "static")),

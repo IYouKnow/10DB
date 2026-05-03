@@ -14,8 +14,6 @@ type Config struct {
 	AppAddr         string
 	AppBaseURL      string
 	AllowedOrigins  []string
-	AdminUsername   string
-	AdminPassword   string
 	MasterKey       string
 	SessionTTL      time.Duration
 	ControlDBPath   string
@@ -32,8 +30,6 @@ func Load() (Config, error) {
 		AppAddr:         getEnv("APP_ADDR", ":8080"),
 		AppBaseURL:      getEnv("APP_BASE_URL", "http://localhost:8080"),
 		AllowedOrigins:  parseOrigins(getEnv("APP_ALLOWED_ORIGINS", "http://localhost:8080,http://localhost:5173,http://127.0.0.1:5173")),
-		AdminUsername:   strings.TrimSpace(os.Getenv("APP_ADMIN_USERNAME")),
-		AdminPassword:   os.Getenv("APP_ADMIN_PASSWORD"),
 		MasterKey:       os.Getenv("APP_MASTER_KEY"),
 		ControlDBPath:   getEnv("CONTROL_DB_PATH", "./data/10db-launch.sqlite"),
 		PGAdminHost:     getEnv("PG_ADMIN_HOST", "localhost"),
@@ -64,8 +60,6 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	var missing []string
 	for key, value := range map[string]string{
-		"APP_ADMIN_USERNAME": c.AdminUsername,
-		"APP_ADMIN_PASSWORD": c.AdminPassword,
 		"APP_MASTER_KEY":     c.MasterKey,
 		"PG_ADMIN_PASSWORD":  c.PGAdminPassword,
 	} {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,13 +13,13 @@ import (
 )
 
 type Session struct {
-	Username  string    `json:"username"`
+	UserID     string    `json:"userId"`
+	UserEmail  string    `json:"userEmail"`
+	UserName   string    `json:"userName"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 type Service struct {
-	adminUsername string
-	adminPassword string
 	signingKey    []byte
 	ttl           time.Duration
 	baseURL       string
@@ -26,25 +27,28 @@ type Service struct {
 
 const CookieName = "ten_db_launch_session"
 
-func New(adminUsername, adminPassword, signingSecret, baseURL string, ttl time.Duration) *Service {
+type sessionContextKey string
+
+const sessionKey sessionContextKey = "auth.session"
+
+func New(signingSecret, baseURL string, ttl time.Duration) *Service {
 	return &Service{
-		adminUsername: adminUsername,
-		adminPassword: adminPassword,
 		signingKey:    []byte(signingSecret),
 		ttl:           ttl,
 		baseURL:       baseURL,
 	}
 }
 
-func (s *Service) Login(username, password string) bool {
-	return username == s.adminUsername && password == s.adminPassword
-}
-
-func (s *Service) CreateCookie() (*http.Cookie, error) {
-	session := Session{
-		Username:  s.adminUsername,
+func (s *Service) NewSession(userID, email, name string) Session {
+	return Session{
+		UserID:    userID,
+		UserEmail: email,
+		UserName:  name,
 		ExpiresAt: time.Now().Add(s.ttl).UTC(),
 	}
+}
+
+func (s *Service) CreateCookie(session Session) (*http.Cookie, error) {
 	raw, err := json.Marshal(session)
 	if err != nil {
 		return nil, err
@@ -110,13 +114,19 @@ func (s *Service) BaseURL() string {
 	return s.baseURL
 }
 
+func SessionFromContext(ctx context.Context) (*Session, bool) {
+	session, ok := ctx.Value(sessionKey).(*Session)
+	return session, ok
+}
+
 func Require(service *Service, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := service.Verify(r); err != nil {
+		session, err := service.Verify(r)
+		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, session)))
 	})
 }
 

@@ -16,17 +16,19 @@ import (
 
 	"github.com/pedro/10db-launch/apps/server/internal/platform/auth"
 	"github.com/pedro/10db-launch/apps/server/internal/project"
+	"github.com/pedro/10db-launch/apps/server/internal/user"
 	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
 type Handler struct {
 	auth     *auth.Service
+	users    *user.Service
 	projects *project.Service
 	origins  []string
 }
 
-func New(authService *auth.Service, projectService *project.Service, allowedOrigins []string) *Handler {
-	return &Handler{auth: authService, projects: projectService, origins: allowedOrigins}
+func New(authService *auth.Service, userService *user.Service, projectService *project.Service, allowedOrigins []string) *Handler {
+	return &Handler{auth: authService, users: userService, projects: projectService, origins: allowedOrigins}
 }
 
 func (h *Handler) Router(staticDir string) http.Handler {
@@ -46,6 +48,7 @@ func (h *Handler) Router(staticDir string) http.Handler {
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Post("/auth/login", h.login)
+		api.Post("/auth/register", h.register)
 		api.With(h.requireAuth).Post("/auth/logout", h.logout)
 		api.With(h.requireAuth).Get("/auth/me", h.me)
 
@@ -112,24 +115,57 @@ func (h *Handler) requireAuth(next http.Handler) http.Handler {
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Username string `json:"username"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := Decode(r, &body); err != nil {
 		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	if !h.auth.Login(body.Username, body.Password) {
-		Error(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials", nil)
+	user, err := h.users.Authenticate(r.Context(), body.Email, body.Password)
+	if err != nil {
+		Error(w, http.StatusUnauthorized, "invalid_credentials", err.Error(), nil)
 		return
 	}
-	cookie, err := h.auth.CreateCookie()
+	cookie, err := h.auth.CreateCookie(h.auth.NewSession(user.ID, user.Email, user.Name))
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "session_error", err.Error(), nil)
 		return
 	}
 	http.SetCookie(w, cookie)
-	JSON(w, http.StatusOK, map[string]any{"ok": true})
+	JSON(w, http.StatusOK, map[string]any{"user": map[string]any{
+		"id":    user.ID,
+		"email": user.Email,
+		"name":  user.Name,
+	}})
+}
+
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := Decode(r, &body); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+		return
+	}
+	user, err := h.users.Register(r.Context(), body.Name, body.Email, body.Password)
+	if err != nil {
+		Error(w, http.StatusBadRequest, "register_failed", err.Error(), nil)
+		return
+	}
+	cookie, err := h.auth.CreateCookie(h.auth.NewSession(user.ID, user.Email, user.Name))
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "session_error", err.Error(), nil)
+		return
+	}
+	http.SetCookie(w, cookie)
+	JSON(w, http.StatusCreated, map[string]any{"user": map[string]any{
+		"id":    user.ID,
+		"email": user.Email,
+		"name":  user.Name,
+	}})
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -143,11 +179,20 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	JSON(w, http.StatusOK, map[string]any{"username": session.Username})
+	JSON(w, http.StatusOK, map[string]any{
+		"id":    session.UserID,
+		"email": session.UserEmail,
+		"name":  session.UserName,
+	})
 }
 
 func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := h.projects.List(r.Context())
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	projects, err := h.projects.List(r.Context(), session.UserID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "list_projects_failed", err.Error(), nil)
 		return
@@ -156,12 +201,17 @@ func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
 	var body project.CreateProjectInput
 	if err := Decode(r, &body); err != nil {
 		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	project, err := h.projects.Create(r.Context(), body)
+	project, err := h.projects.Create(r.Context(), session.UserID, body)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "create_project_failed", err.Error(), nil)
 		return
@@ -170,7 +220,12 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
-	project, err := h.projects.Get(r.Context(), chi.URLParam(r, "projectID"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	project, err := h.projects.Get(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		Error(w, http.StatusNotFound, "project_not_found", err.Error(), nil)
 		return
@@ -179,7 +234,12 @@ func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteProject(w http.ResponseWriter, r *http.Request) {
-	if err := h.projects.Delete(r.Context(), chi.URLParam(r, "projectID")); err != nil {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	if err := h.projects.Delete(r.Context(), session.UserID, chi.URLParam(r, "projectID")); err != nil {
 		Error(w, http.StatusBadRequest, "delete_project_failed", err.Error(), nil)
 		return
 	}
@@ -187,7 +247,12 @@ func (h *Handler) deleteProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) resetProject(w http.ResponseWriter, r *http.Request) {
-	if err := h.projects.Reset(r.Context(), chi.URLParam(r, "projectID")); err != nil {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	if err := h.projects.Reset(r.Context(), session.UserID, chi.URLParam(r, "projectID")); err != nil {
 		Error(w, http.StatusBadRequest, "reset_project_failed", err.Error(), nil)
 		return
 	}
@@ -195,7 +260,12 @@ func (h *Handler) resetProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) projectConnection(w http.ResponseWriter, r *http.Request) {
-	connection, err := h.projects.Connection(r.Context(), chi.URLParam(r, "projectID"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	connection, err := h.projects.Connection(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		Error(w, http.StatusBadRequest, "connection_failed", err.Error(), nil)
 		return
@@ -204,7 +274,12 @@ func (h *Handler) projectConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {
-	revision, err := h.projects.LatestSchema(r.Context(), chi.URLParam(r, "projectID"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	revision, err := h.projects.LatestSchema(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		JSON(w, http.StatusOK, types.SchemaBlueprint{Version: 1, ProjectID: chi.URLParam(r, "projectID"), Tables: []types.TableBlueprint{}})
 		return
@@ -213,12 +288,17 @@ func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) putSchema(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
 	var blueprint types.SchemaBlueprint
 	if err := Decode(r, &blueprint); err != nil {
 		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	revision, validationErrors, err := h.projects.SaveSchema(r.Context(), chi.URLParam(r, "projectID"), blueprint)
+	revision, validationErrors, err := h.projects.SaveSchema(r.Context(), session.UserID, chi.URLParam(r, "projectID"), blueprint)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "save_schema_failed", err.Error(), nil)
 		return
@@ -231,9 +311,18 @@ func (h *Handler) putSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) validateSchema(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
 	var blueprint types.SchemaBlueprint
 	if err := Decode(r, &blueprint); err != nil {
 		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+		return
+	}
+	if _, err := h.projects.Get(r.Context(), session.UserID, chi.URLParam(r, "projectID")); err != nil {
+		Error(w, http.StatusNotFound, "project_not_found", err.Error(), nil)
 		return
 	}
 	normalized, errs := h.projects.ValidateBlueprint(r.Context(), chi.URLParam(r, "projectID"), blueprint)
@@ -241,6 +330,11 @@ func (h *Handler) validateSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) sqlPreview(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
 	var blueprint *types.SchemaBlueprint
 	if r.ContentLength > 0 {
 		var body types.SchemaBlueprint
@@ -248,7 +342,7 @@ func (h *Handler) sqlPreview(w http.ResponseWriter, r *http.Request) {
 			blueprint = &body
 		}
 	}
-	sql, errs, err := h.projects.PreviewSQL(r.Context(), chi.URLParam(r, "projectID"), blueprint)
+	sql, errs, err := h.projects.PreviewSQL(r.Context(), session.UserID, chi.URLParam(r, "projectID"), blueprint)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "sql_preview_failed", err.Error(), nil)
 		return
@@ -261,7 +355,12 @@ func (h *Handler) sqlPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) applySchema(w http.ResponseWriter, r *http.Request) {
-	run, err := h.projects.Apply(r.Context(), chi.URLParam(r, "projectID"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	run, err := h.projects.Apply(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		Error(w, http.StatusBadRequest, "apply_failed", err.Error(), run)
 		return
@@ -270,7 +369,12 @@ func (h *Handler) applySchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) schemaRevisions(w http.ResponseWriter, r *http.Request) {
-	revisions, err := h.projects.Revisions(r.Context(), chi.URLParam(r, "projectID"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	revisions, err := h.projects.Revisions(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		Error(w, http.StatusBadRequest, "list_revisions_failed", err.Error(), nil)
 		return
@@ -279,7 +383,12 @@ func (h *Handler) schemaRevisions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listTables(w http.ResponseWriter, r *http.Request) {
-	tables, err := h.projects.ListTables(r.Context(), chi.URLParam(r, "projectID"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	tables, err := h.projects.ListTables(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
 	if err != nil {
 		Error(w, http.StatusBadRequest, "list_tables_failed", err.Error(), nil)
 		return
@@ -288,7 +397,12 @@ func (h *Handler) listTables(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listColumns(w http.ResponseWriter, r *http.Request) {
-	columns, err := h.projects.ListColumns(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tableName"))
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	columns, err := h.projects.ListColumns(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "tableName"))
 	if err != nil {
 		Error(w, http.StatusBadRequest, "list_columns_failed", err.Error(), nil)
 		return
@@ -297,6 +411,11 @@ func (h *Handler) listColumns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
 	limit := 50
 	offset := 0
 	if value := r.URL.Query().Get("limit"); value != "" {
@@ -309,7 +428,7 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 			offset = parsed
 		}
 	}
-	rows, err := h.projects.ListRows(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tableName"), limit, offset)
+	rows, err := h.projects.ListRows(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "tableName"), limit, offset)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "list_rows_failed", err.Error(), nil)
 		return

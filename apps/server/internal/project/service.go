@@ -34,15 +34,15 @@ type CreateProjectInput struct {
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-func (s *Service) List(ctx context.Context) ([]types.Project, error) {
-	return s.store.ListProjects(ctx)
+func (s *Service) List(ctx context.Context, ownerUserID string) ([]types.Project, error) {
+	return s.store.ListProjects(ctx, ownerUserID)
 }
 
-func (s *Service) Get(ctx context.Context, id string) (types.Project, error) {
-	return s.store.GetProject(ctx, id)
+func (s *Service) Get(ctx context.Context, ownerUserID, id string) (types.Project, error) {
+	return s.store.GetProject(ctx, ownerUserID, id)
 }
 
-func (s *Service) Create(ctx context.Context, input CreateProjectInput) (types.Project, error) {
+func (s *Service) Create(ctx context.Context, ownerUserID string, input CreateProjectInput) (types.Project, error) {
 	name := strings.TrimSpace(input.Name)
 	slug := strings.TrimSpace(strings.ToLower(input.Slug))
 	if name == "" || slug == "" {
@@ -67,6 +67,7 @@ func (s *Service) Create(ctx context.Context, input CreateProjectInput) (types.P
 	now := time.Now().UTC()
 	project := types.Project{
 		ID:                  uuid.NewString(),
+		OwnerUserID:         ownerUserID,
 		Name:                name,
 		Slug:                slug,
 		Description:         strings.TrimSpace(input.Description),
@@ -95,8 +96,8 @@ func (s *Service) Create(ctx context.Context, input CreateProjectInput) (types.P
 	return project, nil
 }
 
-func (s *Service) Connection(ctx context.Context, projectID string) (types.ProjectConnection, error) {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) Connection(ctx context.Context, ownerUserID, projectID string) (types.ProjectConnection, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.ProjectConnection{}, err
 	}
@@ -107,7 +108,10 @@ func (s *Service) Connection(ctx context.Context, projectID string) (types.Proje
 	return postgres.BuildConnection(project, password), nil
 }
 
-func (s *Service) SaveSchema(ctx context.Context, projectID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
+func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
+	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
+		return types.SchemaRevision{}, nil, err
+	}
 	blueprint = Normalize(blueprint, projectID)
 	errs := Validate(blueprint)
 	if len(errs) > 0 {
@@ -125,11 +129,17 @@ func (s *Service) SaveSchema(ctx context.Context, projectID string, blueprint ty
 	return revision, nil, err
 }
 
-func (s *Service) LatestSchema(ctx context.Context, projectID string) (types.SchemaRevision, error) {
+func (s *Service) LatestSchema(ctx context.Context, ownerUserID, projectID string) (types.SchemaRevision, error) {
+	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
+		return types.SchemaRevision{}, err
+	}
 	return s.store.GetLatestSchemaRevision(ctx, projectID)
 }
 
-func (s *Service) Revisions(ctx context.Context, projectID string) ([]types.SchemaRevision, error) {
+func (s *Service) Revisions(ctx context.Context, ownerUserID, projectID string) ([]types.SchemaRevision, error) {
+	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
+		return nil, err
+	}
 	return s.store.ListSchemaRevisions(ctx, projectID)
 }
 
@@ -138,7 +148,10 @@ func (s *Service) ValidateBlueprint(_ context.Context, projectID string, bluepri
 	return blueprint, Validate(blueprint)
 }
 
-func (s *Service) PreviewSQL(ctx context.Context, projectID string, blueprint *types.SchemaBlueprint) (string, map[string]string, error) {
+func (s *Service) PreviewSQL(ctx context.Context, ownerUserID, projectID string, blueprint *types.SchemaBlueprint) (string, map[string]string, error) {
+	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
+		return "", nil, err
+	}
 	if blueprint != nil {
 		normalized := Normalize(*blueprint, projectID)
 		errs := Validate(normalized)
@@ -155,8 +168,8 @@ func (s *Service) PreviewSQL(ctx context.Context, projectID string, blueprint *t
 	return revision.GeneratedSQL, nil, nil
 }
 
-func (s *Service) Apply(ctx context.Context, projectID string) (types.ApplyRun, error) {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) Apply(ctx context.Context, ownerUserID, projectID string) (types.ApplyRun, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.ApplyRun{}, err
 	}
@@ -213,8 +226,8 @@ func (s *Service) Apply(ctx context.Context, projectID string) (types.ApplyRun, 
 	return run, nil
 }
 
-func (s *Service) Reset(ctx context.Context, projectID string) error {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) Reset(ctx context.Context, ownerUserID, projectID string) error {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return err
 	}
@@ -225,8 +238,8 @@ func (s *Service) Reset(ctx context.Context, projectID string) error {
 	return s.postgres.ResetProjectSchema(ctx, project, password)
 }
 
-func (s *Service) Delete(ctx context.Context, projectID string) error {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) Delete(ctx context.Context, ownerUserID, projectID string) error {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return err
 	}
@@ -236,8 +249,8 @@ func (s *Service) Delete(ctx context.Context, projectID string) error {
 	return s.store.DeleteProject(ctx, project.ID)
 }
 
-func (s *Service) ListTables(ctx context.Context, projectID string) ([]types.TableInfo, error) {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) ListTables(ctx context.Context, ownerUserID, projectID string) ([]types.TableInfo, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -248,8 +261,8 @@ func (s *Service) ListTables(ctx context.Context, projectID string) ([]types.Tab
 	return s.postgres.ListTables(ctx, project, password)
 }
 
-func (s *Service) ListColumns(ctx context.Context, projectID, tableName string) ([]types.ColumnInfo, error) {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) ListColumns(ctx context.Context, ownerUserID, projectID, tableName string) ([]types.ColumnInfo, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +273,8 @@ func (s *Service) ListColumns(ctx context.Context, projectID, tableName string) 
 	return s.postgres.ListColumns(ctx, project, password, tableName)
 }
 
-func (s *Service) ListRows(ctx context.Context, projectID, tableName string, limit, offset int) (types.TableRows, error) {
-	project, err := s.store.GetProject(ctx, projectID)
+func (s *Service) ListRows(ctx context.Context, ownerUserID, projectID, tableName string, limit, offset int) (types.TableRows, error) {
+	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.TableRows{}, err
 	}
