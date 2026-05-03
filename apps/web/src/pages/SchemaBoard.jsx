@@ -16,7 +16,7 @@ export default function SchemaBoard() {
   const [menu, setMenu] = useState(null);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isRemovingDatabase, setIsRemovingDatabase] = useState(false);
-  const [databasePosition, setDatabasePosition] = useState({ x: 80, y: 80 });
+  const [databasePositions, setDatabasePositions] = useState({});
   const { getProject, provisionPostgres, removeProvisionedPostgres } = useProjects();
 
   useEffect(() => {
@@ -28,6 +28,18 @@ export default function SchemaBoard() {
         const data = await getProject(projectId);
         if (mounted) {
           setProject(data);
+          setDatabasePositions((current) => {
+            const next = { ...current };
+            (data.databases ?? []).forEach((database, index) => {
+              if (!next[database.id]) {
+                next[database.id] = {
+                  x: database.positionX ?? 80 + index * 180,
+                  y: database.positionY ?? 80 + (index % 2) * 120,
+                };
+              }
+            });
+            return next;
+          });
         }
       } finally {
         if (mounted) {
@@ -69,10 +81,13 @@ export default function SchemaBoard() {
         draggingRef.current.moved = true;
       }
 
-      setDatabasePosition({
-        x: Math.max(0, Math.min(nextX, 1400 - 320)),
-        y: Math.max(0, Math.min(nextY, 900 - 170)),
-      });
+      setDatabasePositions((current) => ({
+        ...current,
+        [draggingRef.current.databaseID]: {
+          x: Math.max(0, Math.min(nextX, 1400 - 320)),
+          y: Math.max(0, Math.min(nextY, 900 - 170)),
+        },
+      }));
     };
 
     const handlePointerUp = () => {
@@ -114,10 +129,10 @@ export default function SchemaBoard() {
     }
   };
 
-  const handleRemovePostgres = async () => {
+  const handleRemovePostgres = async (databaseId) => {
     setIsRemovingDatabase(true);
     try {
-      const data = await removeProvisionedPostgres(projectId);
+      const data = await removeProvisionedPostgres(projectId, databaseId);
       setProject(data);
       setMenu(null);
       toast.success('PostgreSQL database removed from this project');
@@ -128,7 +143,7 @@ export default function SchemaBoard() {
     }
   };
 
-  const handleDatabaseMouseDown = (event) => {
+  const handleDatabaseMouseDown = (event, databaseId) => {
     if (event.button !== 0) {
       return;
     }
@@ -138,21 +153,23 @@ export default function SchemaBoard() {
       return;
     }
 
+    const position = databasePositions[databaseId] ?? { x: 80, y: 80 };
     draggingRef.current = {
-      offsetX: event.clientX - bounds.left - databasePosition.x,
-      offsetY: event.clientY - bounds.top - databasePosition.y,
-      startX: databasePosition.x,
-      startY: databasePosition.y,
+      databaseID: databaseId,
+      offsetX: event.clientX - bounds.left - position.x,
+      offsetY: event.clientY - bounds.top - position.y,
+      startX: position.x,
+      startY: position.y,
       moved: false,
     };
   };
 
-  const handleDatabaseClick = () => {
+  const handleDatabaseClick = (databaseId) => {
     if (suppressDatabaseClickRef.current) {
       suppressDatabaseClickRef.current = false;
       return;
     }
-    navigate(`/projects/${projectId}/database/schema`);
+    navigate(`/projects/${projectId}/databases/${databaseId}/schema`);
   };
 
   return (
@@ -191,47 +208,53 @@ export default function SchemaBoard() {
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 Loading project board...
               </div>
-            ) : project?.pgDatabaseName ? (
-              <div
-                className="group absolute w-80 cursor-grab rounded-2xl border border-border bg-card p-5 shadow-2xl shadow-black/20 transition-colors hover:border-primary/25 active:cursor-grabbing"
-                style={{ left: databasePosition.x, top: databasePosition.y }}
-                onMouseDown={handleDatabaseMouseDown}
-                onClick={handleDatabaseClick}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
-                    <Database className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <h2 className="text-sm font-semibold text-foreground">PostgreSQL Database</h2>
-                    <p className="mt-1 font-mono text-xs text-muted-foreground">{project.pgDatabaseName}</p>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Database provisioned. Next we can make this board add tables, relations, and schema objects inside it.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleRemovePostgres();
-                    }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    disabled={isRemovingDatabase}
-                    className="rounded-lg border border-destructive/20 px-2.5 py-1.5 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+            ) : project?.databases?.length ? (
+              project.databases.map((database) => {
+                const position = databasePositions[database.id] ?? { x: 80, y: 80 };
+                return (
+                  <div
+                    key={database.id}
+                    className="group absolute w-80 cursor-grab rounded-2xl border border-border bg-card p-5 shadow-2xl shadow-black/20 transition-colors hover:border-primary/25 active:cursor-grabbing"
+                    style={{ left: position.x, top: position.y }}
+                    onMouseDown={(event) => handleDatabaseMouseDown(event, database.id)}
+                    onClick={() => handleDatabaseClick(database.id)}
                   >
-                    {isRemovingDatabase ? 'Removing...' : 'Delete'}
-                  </button>
-                </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
+                        <Database className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <h2 className="text-sm font-semibold text-foreground">{database.name}</h2>
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">{database.pgDatabaseName}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Database provisioned. Click to enter the inner schema board for tables and relations.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleRemovePostgres(database.id);
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        disabled={isRemovingDatabase}
+                        className="rounded-lg border border-destructive/20 px-2.5 py-1.5 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isRemovingDatabase ? 'Removing...' : 'Delete'}
+                      </button>
+                    </div>
 
-                <div className="mt-4 flex items-center gap-2 border-t border-border pt-3">
-                  <div className="rounded-md bg-secondary px-2 py-1 text-[11px] text-muted-foreground">
-                    PostgreSQL
+                    <div className="mt-4 flex items-center gap-2 border-t border-border pt-3">
+                      <div className="rounded-md bg-secondary px-2 py-1 text-[11px] text-muted-foreground">
+                        PostgreSQL
+                      </div>
+                      <div className="rounded-md bg-secondary px-2 py-1 text-[11px] text-muted-foreground">
+                        {database.status}
+                      </div>
+                    </div>
                   </div>
-                  <div className="rounded-md bg-secondary px-2 py-1 text-[11px] text-muted-foreground">
-                    Ready
-                  </div>
-                </div>
-              </div>
+                );
+              })
             ) : (
               <div className="flex h-full items-center justify-center p-10">
                 <div className="max-w-md rounded-3xl border border-dashed border-border bg-card/80 px-8 py-10 text-center shadow-2xl shadow-black/10 backdrop-blur">
@@ -267,8 +290,8 @@ export default function SchemaBoard() {
                     ? 'Dropping database and role from PostgreSQL...'
                     : isProvisioning
                     ? 'Provisioning database...'
-                    : project?.pgDatabaseName
-                      ? 'This project already has a PostgreSQL database. You can remove it from here.'
+                    : project?.databases?.length
+                      ? 'This project can hold multiple PostgreSQL databases. Add another from here.'
                       : 'Add a PostgreSQL database to this project'}
                 </div>
               </div>

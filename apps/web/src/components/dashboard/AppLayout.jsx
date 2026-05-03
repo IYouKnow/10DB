@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  LayoutGrid, GitBranch, Table2, KeyRound, Code2, Database,
+  LayoutGrid, GitBranch, Table2, Database,
   Settings, ChevronDown, Circle, Menu
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -12,10 +12,6 @@ import { Button } from '@/components/ui/button';
 const navItems = [
   { label: 'All Projects', icon: LayoutGrid, href: () => '/' },
   { label: 'Project Board', icon: GitBranch, href: (projectId) => `/projects/${projectId}/board` },
-  { label: 'DB Schema', icon: Table2, href: (projectId) => `/projects/${projectId}/database/schema` },
-  { label: 'Tables', icon: Table2, href: (projectId) => `/projects/${projectId}/tables` },
-  { label: 'Credentials', icon: KeyRound, href: (projectId) => `/projects/${projectId}/credentials` },
-  { label: 'SQL Preview', icon: Code2, href: (projectId) => `/projects/${projectId}/sql` },
   { label: 'Backups', icon: Database, href: (projectId) => `/projects/${projectId}/backups` },
   { label: 'Settings', icon: Settings, href: (projectId) => `/projects/${projectId}/settings` },
 ];

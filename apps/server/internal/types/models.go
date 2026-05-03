@@ -13,21 +13,40 @@ const (
 )
 
 type Project struct {
-	ID                    string        `json:"id"`
-	OwnerUserID           string        `json:"-"`
-	Name                  string        `json:"name"`
-	Slug                  string        `json:"slug"`
-	Description           string        `json:"description"`
-	Status                ProjectStatus `json:"status"`
-	PGDatabaseName        string        `json:"pgDatabaseName"`
-	PGRoleName            string        `json:"pgRoleName"`
-	PGPasswordEncrypted   string        `json:"-"`
-	PGHost                string        `json:"pgHost"`
-	PGPort                int           `json:"pgPort"`
-	PGSSLMode             string        `json:"pgSslMode"`
-	LastAppliedRevisionID *string       `json:"lastAppliedRevisionId,omitempty"`
-	CreatedAt             time.Time     `json:"createdAt"`
-	UpdatedAt             time.Time     `json:"updatedAt"`
+	ID                    string            `json:"id"`
+	OwnerUserID           string            `json:"-"`
+	Name                  string            `json:"name"`
+	Slug                  string            `json:"slug"`
+	Description           string            `json:"description"`
+	Status                ProjectStatus     `json:"status"`
+	Databases             []ProjectDatabase `json:"databases,omitempty"`
+	PGDatabaseName        string            `json:"pgDatabaseName"`
+	PGRoleName            string            `json:"pgRoleName"`
+	PGPasswordEncrypted   string            `json:"-"`
+	PGHost                string            `json:"pgHost"`
+	PGPort                int               `json:"pgPort"`
+	PGSSLMode             string            `json:"pgSslMode"`
+	LastAppliedRevisionID *string           `json:"lastAppliedRevisionId,omitempty"`
+	CreatedAt             time.Time         `json:"createdAt"`
+	UpdatedAt             time.Time         `json:"updatedAt"`
+}
+
+type ProjectDatabase struct {
+	ID                  string    `json:"id"`
+	ProjectID           string    `json:"projectId"`
+	Engine              string    `json:"engine"`
+	Name                string    `json:"name"`
+	Status              string    `json:"status"`
+	PGDatabaseName      string    `json:"pgDatabaseName"`
+	PGRoleName          string    `json:"pgRoleName"`
+	PGPasswordEncrypted string    `json:"-"`
+	PGHost              string    `json:"pgHost"`
+	PGPort              int       `json:"pgPort"`
+	PGSSLMode           string    `json:"pgSslMode"`
+	PositionX           float64   `json:"positionX"`
+	PositionY           float64   `json:"positionY"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 type User struct {

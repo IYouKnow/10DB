@@ -31,6 +31,12 @@ func LoadDotEnvIfPresent() error {
 }
 
 func loadDotEnvFile(path string) error {
+	if _, exists := os.LookupEnv("APP_DOTENV_DIR"); !exists {
+		if err := os.Setenv("APP_DOTENV_DIR", filepath.Dir(path)); err != nil {
+			return fmt.Errorf("set APP_DOTENV_DIR: %w", err)
+		}
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return err

@@ -80,9 +80,6 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	if err != nil {
 		return types.Project{}, err
 	}
-	if project.PGDatabaseName != "" {
-		return project, nil
-	}
 
 	suffix := strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	dbName := fmt.Sprintf("p_%s_%s", strings.ReplaceAll(project.Slug, "-", "_"), suffix)
@@ -96,65 +93,87 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 		return types.Project{}, err
 	}
 
+	index := len(project.Databases)
+	now := time.Now().UTC()
+	database := types.ProjectDatabase{
+		ID:                  uuid.NewString(),
+		ProjectID:           project.ID,
+		Engine:              "postgresql",
+		Name:                fmt.Sprintf("PostgreSQL Database %d", index+1),
+		Status:              string(types.ProjectStatusCreating),
+		PGDatabaseName:      dbName,
+		PGRoleName:          roleName,
+		PGPasswordEncrypted: encryptedPassword,
+		PGHost:              s.pgConfig.Host,
+		PGPort:              s.pgConfig.Port,
+		PGSSLMode:           s.pgConfig.SSLMode,
+		PositionX:           80 + float64(index*180),
+		PositionY:           80 + float64((index%2)*120),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	if err := s.store.CreateProjectDatabase(ctx, database); err != nil {
+		return types.Project{}, err
+	}
+
 	project.Status = types.ProjectStatusCreating
-	project.PGDatabaseName = dbName
-	project.PGRoleName = roleName
-	project.PGPasswordEncrypted = encryptedPassword
-	project.PGHost = s.pgConfig.Host
-	project.PGPort = s.pgConfig.Port
-	project.PGSSLMode = s.pgConfig.SSLMode
-	project.UpdatedAt = time.Now().UTC()
+	project.UpdatedAt = now
 	if err := s.store.UpdateProject(ctx, project); err != nil {
 		return types.Project{}, err
 	}
 
 	if err := s.postgres.CreateProjectDatabase(ctx, dbName, roleName, password); err != nil {
+		_ = s.store.DeleteProjectDatabase(ctx, project.ID, database.ID)
 		project.Status = types.ProjectStatusDraft
-		project.PGDatabaseName = ""
-		project.PGRoleName = ""
-		project.PGPasswordEncrypted = ""
-		project.PGHost = ""
-		project.PGPort = 0
-		project.PGSSLMode = ""
 		project.UpdatedAt = time.Now().UTC()
 		_ = s.store.UpdateProject(ctx, project)
 		return types.Project{}, err
 	}
 
+	database.Status = string(types.ProjectStatusReady)
+	database.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateProjectDatabase(ctx, database); err != nil {
+		return types.Project{}, err
+	}
 	project.Status = types.ProjectStatusReady
 	project.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateProject(ctx, project); err != nil {
 		return types.Project{}, err
 	}
-	return project, nil
+	return s.store.GetProject(ctx, ownerUserID, projectID)
 }
 
-func (s *Service) RemoveProvisionedPostgres(ctx context.Context, ownerUserID, projectID string) (types.Project, error) {
+func (s *Service) RemoveProvisionedPostgres(ctx context.Context, ownerUserID, projectID, databaseID string) (types.Project, error) {
 	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.Project{}, err
 	}
-	if project.PGDatabaseName == "" || project.PGRoleName == "" {
-		return project, nil
-	}
-
-	if err := s.postgres.DropProjectDatabase(ctx, project.PGDatabaseName, project.PGRoleName); err != nil {
+	database, err := s.store.GetProjectDatabase(ctx, project.ID, databaseID)
+	if err != nil {
 		return types.Project{}, err
 	}
 
-	project.Status = types.ProjectStatusDraft
-	project.PGDatabaseName = ""
-	project.PGRoleName = ""
-	project.PGPasswordEncrypted = ""
-	project.PGHost = ""
-	project.PGPort = 0
-	project.PGSSLMode = ""
-	project.LastAppliedRevisionID = nil
+	if err := s.postgres.DropProjectDatabase(ctx, database.PGDatabaseName, database.PGRoleName); err != nil {
+		return types.Project{}, err
+	}
+	if err := s.store.DeleteProjectDatabase(ctx, project.ID, database.ID); err != nil {
+		return types.Project{}, err
+	}
+
+	remainingDatabases, err := s.store.ListProjectDatabases(ctx, project.ID)
+	if err != nil {
+		return types.Project{}, err
+	}
+	if len(remainingDatabases) == 0 {
+		project.Status = types.ProjectStatusDraft
+	} else {
+		project.Status = types.ProjectStatusReady
+	}
 	project.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateProject(ctx, project); err != nil {
 		return types.Project{}, err
 	}
-	return project, nil
+	return s.store.GetProject(ctx, ownerUserID, projectID)
 }
 
 func (s *Service) Connection(ctx context.Context, ownerUserID, projectID string) (types.ProjectConnection, error) {

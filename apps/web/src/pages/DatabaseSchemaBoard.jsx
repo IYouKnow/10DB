@@ -8,7 +8,7 @@ import InspectorPanel from '../components/schema/InspectorPanel';
 import { toast } from 'sonner';
 
 export default function DatabaseSchemaBoard() {
-  const { projectId } = useParams();
+  const { projectId, databaseId } = useParams();
   const boardViewportRef = useRef(null);
   const [tables, setTables] = useState([]);
   const [selectedTable, setSelectedTable] = useState(null);
@@ -200,7 +200,7 @@ export default function DatabaseSchemaBoard() {
                 <div className="max-w-md rounded-3xl border border-dashed border-border bg-card/80 px-8 py-10 text-center shadow-2xl shadow-black/10 backdrop-blur">
                   <h2 className="text-lg font-semibold text-foreground">Database schema board</h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    This is where tables will live. Add your first table to start shaping the database schema inside this PostgreSQL database.
+                    This is where tables will live. Add your first table to start shaping the schema inside database `{databaseId}`.
                   </p>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { GitBranch, KeyRound, Code2, Trash2, Table2 } from 'lucide-react';
+import { GitBranch, Trash2, Table2, Database } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const statusConfig = {
@@ -71,7 +71,7 @@ export default function ProjectCard({ project, onDelete }) {
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-mono font-semibold text-sm text-foreground">{project.name}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5 font-mono">{project.pgDatabaseName || 'No database added yet'}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 font-mono">{project.databases?.length ? `${project.databases.length} database${project.databases.length === 1 ? '' : 's'}` : 'No database added yet'}</p>
         </div>
         <span className={cn('text-[10px] font-medium px-2 py-0.5 rounded-full border', status.color)}>
           {status.label}
@@ -85,8 +85,8 @@ export default function ProjectCard({ project, onDelete }) {
           <span>{project.slug}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className={cn('w-1.5 h-1.5 rounded-full', project.pgDatabaseName ? 'bg-chart-3' : 'bg-muted-foreground/40')} />
-          <span>{project.pgDatabaseName ? `${project.pgHost}:${project.pgPort}` : 'Right-click in board to add DB'}</span>
+          <div className={cn('w-1.5 h-1.5 rounded-full', project.databases?.length ? 'bg-chart-3' : 'bg-muted-foreground/40')} />
+          <span>{project.databases?.length ? `${project.databases.length} active DB cards` : 'Right-click in board to add DB'}</span>
         </div>
       </div>
 
@@ -102,18 +102,11 @@ export default function ProjectCard({ project, onDelete }) {
           Open
         </Link>
         <Link
-          to={`${projectBasePath}/credentials`}
+          to={projectBoardPath}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
         >
-          <KeyRound className="w-3 h-3" />
-          Creds
-        </Link>
-        <Link
-          to={`${projectBasePath}/sql`}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
-        >
-          <Code2 className="w-3 h-3" />
-          SQL
+          <Database className="w-3 h-3" />
+          Databases
         </Link>
         <button
           onClick={() => onDelete(project.id)}

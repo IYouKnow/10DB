@@ -94,7 +94,7 @@ export function ProjectsProvider({ children }) {
   }, []);
 
   const provisionPostgres = useCallback(async (projectId) => {
-    const project = await request(`/api/v1/projects/${projectId}/provision/postgres`, {
+    const project = await request(`/api/v1/projects/${projectId}/databases/postgres`, {
       method: 'POST',
     });
 
@@ -105,20 +105,10 @@ export function ProjectsProvider({ children }) {
     return project;
   }, []);
 
-  const removeProvisionedPostgres = useCallback(async (projectId) => {
-    let project;
-    try {
-      project = await request(`/api/v1/projects/${projectId}/provision/postgres`, {
-        method: 'DELETE',
-      });
-    } catch (error) {
-      if (error.status !== 404) {
-        throw error;
-      }
-      project = await request(`/api/v1/projects/${projectId}/provision/postgres/remove`, {
-        method: 'POST',
-      });
-    }
+  const removeProvisionedPostgres = useCallback(async (projectId, databaseId) => {
+    const project = await request(`/api/v1/projects/${projectId}/databases/${databaseId}`, {
+      method: 'DELETE',
+    });
 
     setProjects((current) => current.map((entry) => (
       entry.id === project.id ? project : entry

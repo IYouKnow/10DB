@@ -19,6 +19,98 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
+func (s *Store) EnsureSchema(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS project_databases (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL,
+			engine TEXT NOT NULL,
+			name TEXT NOT NULL,
+			status TEXT NOT NULL,
+			pg_database_name TEXT NOT NULL,
+			pg_role_name TEXT NOT NULL,
+			pg_password_encrypted TEXT NOT NULL,
+			pg_host TEXT NOT NULL,
+			pg_port INTEGER NOT NULL,
+			pg_ssl_mode TEXT NOT NULL,
+			position_x REAL NOT NULL DEFAULT 80,
+			position_y REAL NOT NULL DEFAULT 80,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_databases_project_id ON project_databases(project_id)`,
+	}
+	for _, statement := range statements {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, status, pg_database_name, pg_role_name, pg_password_encrypted, pg_host, pg_port, pg_ssl_mode, created_at, updated_at
+		FROM projects
+		WHERE pg_database_name <> ''
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			projectID string
+			status    string
+			dbName    string
+			roleName  string
+			password  string
+			host      string
+			port      int
+			sslMode   string
+			createdAt string
+			updatedAt string
+		)
+		if err := rows.Scan(&projectID, &status, &dbName, &roleName, &password, &host, &port, &sslMode, &createdAt, &updatedAt); err != nil {
+			return err
+		}
+
+		var count int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases WHERE project_id = ? AND pg_database_name = ?`, projectID, dbName).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO project_databases (
+				id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+				pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			uuid.NewString(),
+			projectID,
+			"postgresql",
+			"PostgreSQL Database",
+			status,
+			dbName,
+			roleName,
+			password,
+			host,
+			port,
+			sslMode,
+			80.0,
+			80.0,
+			createdAt,
+			updatedAt,
+		); err != nil {
+			return err
+		}
+	}
+
+	return rows.Err()
+}
+
 func (s *Store) ListProjects(ctx context.Context, ownerUserID string) ([]types.Project, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, owner_user_id, name, slug, description, status, pg_database_name, pg_role_name, pg_password_encrypted,
@@ -37,6 +129,10 @@ func (s *Store) ListProjects(ctx context.Context, ownerUserID string) ([]types.P
 		if err != nil {
 			return nil, err
 		}
+		project.Databases, err = s.ListProjectDatabases(ctx, project.ID)
+		if err != nil {
+			return nil, err
+		}
 		projects = append(projects, project)
 	}
 	return projects, rows.Err()
@@ -48,7 +144,15 @@ func (s *Store) GetProject(ctx context.Context, ownerUserID, id string) (types.P
 		       pg_host, pg_port, pg_ssl_mode, last_applied_revision_id, created_at, updated_at
 		FROM projects WHERE id = ? AND owner_user_id = ?
 	`, id, ownerUserID)
-	return scanProject(row)
+	project, err := scanProject(row)
+	if err != nil {
+		return types.Project{}, err
+	}
+	project.Databases, err = s.ListProjectDatabases(ctx, project.ID)
+	if err != nil {
+		return types.Project{}, err
+	}
+	return project, nil
 }
 
 func (s *Store) CreateProject(ctx context.Context, project types.Project) error {
@@ -104,6 +208,96 @@ func (s *Store) UpdateProject(ctx context.Context, project types.Project) error 
 
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	return err
+}
+
+func (s *Store) ListProjectDatabases(ctx context.Context, projectID string) ([]types.ProjectDatabase, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+		       pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
+		FROM project_databases
+		WHERE project_id = ?
+		ORDER BY created_at ASC
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	databases := make([]types.ProjectDatabase, 0)
+	for rows.Next() {
+		database, err := scanProjectDatabase(rows)
+		if err != nil {
+			return nil, err
+		}
+		databases = append(databases, database)
+	}
+	return databases, rows.Err()
+}
+
+func (s *Store) GetProjectDatabase(ctx context.Context, projectID, databaseID string) (types.ProjectDatabase, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+		       pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
+		FROM project_databases
+		WHERE id = ? AND project_id = ?
+	`, databaseID, projectID)
+	return scanProjectDatabase(row)
+}
+
+func (s *Store) CreateProjectDatabase(ctx context.Context, database types.ProjectDatabase) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO project_databases (
+			id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+			pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		database.ID,
+		database.ProjectID,
+		database.Engine,
+		database.Name,
+		database.Status,
+		database.PGDatabaseName,
+		database.PGRoleName,
+		database.PGPasswordEncrypted,
+		database.PGHost,
+		database.PGPort,
+		database.PGSSLMode,
+		database.PositionX,
+		database.PositionY,
+		database.CreatedAt.Format(time.RFC3339Nano),
+		database.UpdatedAt.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *Store) UpdateProjectDatabase(ctx context.Context, database types.ProjectDatabase) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE project_databases
+		SET engine = ?, name = ?, status = ?, pg_database_name = ?, pg_role_name = ?, pg_password_encrypted = ?,
+		    pg_host = ?, pg_port = ?, pg_ssl_mode = ?, position_x = ?, position_y = ?, updated_at = ?
+		WHERE id = ? AND project_id = ?
+	`,
+		database.Engine,
+		database.Name,
+		database.Status,
+		database.PGDatabaseName,
+		database.PGRoleName,
+		database.PGPasswordEncrypted,
+		database.PGHost,
+		database.PGPort,
+		database.PGSSLMode,
+		database.PositionX,
+		database.PositionY,
+		database.UpdatedAt.Format(time.RFC3339Nano),
+		database.ID,
+		database.ProjectID,
+	)
+	return err
+}
+
+func (s *Store) DeleteProjectDatabase(ctx context.Context, projectID, databaseID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM project_databases WHERE id = ? AND project_id = ?`, databaseID, projectID)
 	return err
 }
 
@@ -210,6 +404,34 @@ func scanProject(scanner interface{ Scan(dest ...any) error }) (types.Project, e
 		project.LastAppliedRevisionID = &lastApplied.String
 	}
 	return project, nil
+}
+
+func scanProjectDatabase(scanner interface{ Scan(dest ...any) error }) (types.ProjectDatabase, error) {
+	var database types.ProjectDatabase
+	var createdAt, updatedAt string
+	err := scanner.Scan(
+		&database.ID,
+		&database.ProjectID,
+		&database.Engine,
+		&database.Name,
+		&database.Status,
+		&database.PGDatabaseName,
+		&database.PGRoleName,
+		&database.PGPasswordEncrypted,
+		&database.PGHost,
+		&database.PGPort,
+		&database.PGSSLMode,
+		&database.PositionX,
+		&database.PositionY,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return types.ProjectDatabase{}, err
+	}
+	database.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	database.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return database, nil
 }
 
 func scanRevision(scanner interface{ Scan(dest ...any) error }) (types.SchemaRevision, error) {

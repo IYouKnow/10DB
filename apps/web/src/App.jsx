@@ -23,7 +23,7 @@ const DashboardApp = () => (
       <Route path="/projects/:projectId" element={<AppLayout />}>
         <Route index element={<Navigate to="board" replace />} />
         <Route path="board" element={<SchemaBoard />} />
-        <Route path="database/schema" element={<DatabaseSchemaBoard />} />
+        <Route path="databases/:databaseId/schema" element={<DatabaseSchemaBoard />} />
         <Route path="tables" element={<Tables />} />
         <Route path="credentials" element={<Credentials />} />
         <Route path="sql" element={<SqlPreview />} />

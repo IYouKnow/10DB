@@ -1,0 +1,8 @@
+{
+  "name": "10db-launch-server",
+  "private": true,
+  "scripts": {
+    "dev": "go run .",
+    "test": "go test ./..."
+  }
+}

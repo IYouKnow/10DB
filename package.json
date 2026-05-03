@@ -1,0 +1,11 @@
+{
+  "name": "10db-launch",
+  "private": true,
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter 10db-launch-server --filter 10db-launch-web dev",
+    "dev:server": "pnpm --filter 10db-launch-server dev",
+    "dev:web": "pnpm --filter 10db-launch-web dev",
+    "build:web": "pnpm --filter 10db-launch-web build"
+  }
+}

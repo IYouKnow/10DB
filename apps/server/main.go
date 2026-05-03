@@ -60,6 +60,9 @@ func main() {
 	defer pgService.Close()
 
 	store := project.NewStore(sqliteDB)
+	if err := store.EnsureSchema(ctx); err != nil {
+		log.Fatalf("ensure project schema: %v", err)
+	}
 	userStore := user.NewStore(sqliteDB)
 	if err := userStore.EnsureSchema(ctx); err != nil {
 		log.Fatalf("ensure user schema: %v", err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,7 @@ func Load() (Config, error) {
 		AppBaseURL:      getEnv("APP_BASE_URL", "http://localhost:8080"),
 		AllowedOrigins:  parseOrigins(getEnv("APP_ALLOWED_ORIGINS", "http://localhost:8080,http://localhost:5173,http://127.0.0.1:5173")),
 		MasterKey:       os.Getenv("APP_MASTER_KEY"),
-		ControlDBPath:   getEnv("CONTROL_DB_PATH", "./data/10db-launch.sqlite"),
+		ControlDBPath:   resolveControlDBPath(getEnv("CONTROL_DB_PATH", "apps/server/data/10db-launch.sqlite")),
 		PGAdminHost:     getEnv("PG_ADMIN_HOST", "localhost"),
 		PGAdminDB:       getEnv("PG_ADMIN_DB", "postgres"),
 		PGAdminUser:     getEnv("PG_ADMIN_USER", "postgres"),
@@ -60,8 +61,8 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	var missing []string
 	for key, value := range map[string]string{
-		"APP_MASTER_KEY":     c.MasterKey,
-		"PG_ADMIN_PASSWORD":  c.PGAdminPassword,
+		"APP_MASTER_KEY":    c.MasterKey,
+		"PG_ADMIN_PASSWORD": c.PGAdminPassword,
 	} {
 		if strings.TrimSpace(value) == "" {
 			missing = append(missing, key)
@@ -114,4 +115,22 @@ func parseOrigins(raw string) []string {
 		origins = append(origins, trimmed)
 	}
 	return origins
+}
+
+func resolveControlDBPath(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		raw = "apps/server/data/10db-launch.sqlite"
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+
+	baseDir := os.Getenv("APP_DOTENV_DIR")
+	if strings.TrimSpace(baseDir) == "" {
+		baseDir, _ = os.Getwd()
+	}
+	if strings.TrimSpace(baseDir) == "" {
+		return raw
+	}
+	return filepath.Clean(filepath.Join(baseDir, raw))
 }

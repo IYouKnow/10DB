@@ -57,9 +57,8 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Get("/projects", h.listProjects)
 			secure.Post("/projects", h.createProject)
 			secure.Get("/projects/{projectID}", h.getProject)
-			secure.Post("/projects/{projectID}/provision/postgres", h.provisionPostgres)
-			secure.Delete("/projects/{projectID}/provision/postgres", h.removeProvisionedPostgres)
-			secure.Post("/projects/{projectID}/provision/postgres/remove", h.removeProvisionedPostgres)
+			secure.Post("/projects/{projectID}/databases/postgres", h.provisionPostgres)
+			secure.Delete("/projects/{projectID}/databases/{databaseID}", h.removeProvisionedPostgres)
 			secure.Delete("/projects/{projectID}", h.deleteProject)
 			secure.Post("/projects/{projectID}/reset", h.resetProject)
 			secure.Get("/projects/{projectID}/connection", h.projectConnection)
@@ -256,7 +255,7 @@ func (h *Handler) removeProvisionedPostgres(w http.ResponseWriter, r *http.Reque
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	project, err := h.projects.RemoveProvisionedPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
+	project, err := h.projects.RemoveProvisionedPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"), chi.URLParam(r, "databaseID"))
 	if err != nil {
 		Error(w, http.StatusBadRequest, "remove_postgres_failed", err.Error(), nil)
 		return
