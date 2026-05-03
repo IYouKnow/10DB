@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:-postgres}
+      POSTGRES_DB: ${PG_ADMIN_DB:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_ADMIN_USER:-postgres} -d ${PG_ADMIN_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_net
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/server.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - app_data:/data
+    healthcheck:
+      test: ["CMD", "/app/10db-launch", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_net
+
+volumes:
+  postgres_data:
+  app_data:
+
+networks:
+  app_net:

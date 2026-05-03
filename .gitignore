@@ -1,0 +1,15 @@
+.env
+.env.local
+node_modules/
+dist/
+coverage/
+tmp/
+*.log
+apps/server/static/*
+!apps/server/static/.gitkeep
+apps/server/data/
+apps/web/.vite/
+apps/web/dist/
+bin/
+scripts/
+.DS_Store

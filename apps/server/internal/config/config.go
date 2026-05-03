@@ -1,0 +1,123 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	AppAddr         string
+	AppBaseURL      string
+	AllowedOrigins  []string
+	AdminUsername   string
+	AdminPassword   string
+	MasterKey       string
+	SessionTTL      time.Duration
+	ControlDBPath   string
+	PGAdminHost     string
+	PGAdminPort     int
+	PGAdminDB       string
+	PGAdminUser     string
+	PGAdminPassword string
+	PGSSLMode       string
+}
+
+func Load() (Config, error) {
+	cfg := Config{
+		AppAddr:         getEnv("APP_ADDR", ":8080"),
+		AppBaseURL:      getEnv("APP_BASE_URL", "http://localhost:8080"),
+		AllowedOrigins:  parseOrigins(getEnv("APP_ALLOWED_ORIGINS", "http://localhost:8080,http://localhost:5173,http://127.0.0.1:5173")),
+		AdminUsername:   strings.TrimSpace(os.Getenv("APP_ADMIN_USERNAME")),
+		AdminPassword:   os.Getenv("APP_ADMIN_PASSWORD"),
+		MasterKey:       os.Getenv("APP_MASTER_KEY"),
+		ControlDBPath:   getEnv("CONTROL_DB_PATH", "./data/10db-launch.sqlite"),
+		PGAdminHost:     getEnv("PG_ADMIN_HOST", "localhost"),
+		PGAdminDB:       getEnv("PG_ADMIN_DB", "postgres"),
+		PGAdminUser:     getEnv("PG_ADMIN_USER", "postgres"),
+		PGAdminPassword: os.Getenv("PG_ADMIN_PASSWORD"),
+		PGSSLMode:       getEnv("PG_SSL_MODE", "disable"),
+	}
+
+	port, err := strconv.Atoi(getEnv("PG_ADMIN_PORT", "5432"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse PG_ADMIN_PORT: %w", err)
+	}
+	cfg.PGAdminPort = port
+
+	ttlHours, err := strconv.Atoi(getEnv("APP_SESSION_TTL_HOURS", "24"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse APP_SESSION_TTL_HOURS: %w", err)
+	}
+	cfg.SessionTTL = time.Duration(ttlHours) * time.Hour
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func (c Config) Validate() error {
+	var missing []string
+	for key, value := range map[string]string{
+		"APP_ADMIN_USERNAME": c.AdminUsername,
+		"APP_ADMIN_PASSWORD": c.AdminPassword,
+		"APP_MASTER_KEY":     c.MasterKey,
+		"PG_ADMIN_PASSWORD":  c.PGAdminPassword,
+	} {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))
+	}
+	if _, err := url.Parse(c.AppBaseURL); err != nil {
+		return fmt.Errorf("invalid APP_BASE_URL: %w", err)
+	}
+	for _, origin := range c.AllowedOrigins {
+		if _, err := url.Parse(origin); err != nil {
+			return fmt.Errorf("invalid APP_ALLOWED_ORIGINS entry %q: %w", origin, err)
+		}
+	}
+	if c.PGAdminPort <= 0 {
+		return errors.New("PG_ADMIN_PORT must be positive")
+	}
+	return nil
+}
+
+func (c Config) AdminDSN() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		url.QueryEscape(c.PGAdminUser),
+		url.QueryEscape(c.PGAdminPassword),
+		c.PGAdminHost,
+		c.PGAdminPort,
+		url.PathEscape(c.PGAdminDB),
+		url.QueryEscape(c.PGSSLMode),
+	)
+}
+
+func getEnv(key, fallback string) string {
+	value := os.Getenv(key)
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func parseOrigins(raw string) []string {
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(strings.TrimRight(part, "/"))
+		if trimmed == "" {
+			continue
+		}
+		origins = append(origins, trimmed)
+	}
+	return origins
+}
