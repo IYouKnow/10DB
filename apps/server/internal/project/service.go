@@ -34,6 +34,14 @@ type CreateProjectInput struct {
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+const (
+	defaultDatabasePositionX = 80.0
+	defaultDatabasePositionY = 80.0
+	databaseColumnGap        = 360.0
+	databaseRowGap           = 220.0
+	databasesPerRow          = 3
+)
+
 func (s *Service) List(ctx context.Context, ownerUserID string) ([]types.Project, error) {
 	return s.store.ListProjects(ctx, ownerUserID)
 }
@@ -94,6 +102,8 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	}
 
 	index := len(project.Databases)
+	column := index % databasesPerRow
+	row := index / databasesPerRow
 	now := time.Now().UTC()
 	database := types.ProjectDatabase{
 		ID:                  uuid.NewString(),
@@ -107,8 +117,8 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 		PGHost:              s.pgConfig.Host,
 		PGPort:              s.pgConfig.Port,
 		PGSSLMode:           s.pgConfig.SSLMode,
-		PositionX:           80 + float64(index*180),
-		PositionY:           80 + float64((index%2)*120),
+		PositionX:           defaultDatabasePositionX + float64(column)*databaseColumnGap,
+		PositionY:           defaultDatabasePositionY + float64(row)*databaseRowGap,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}

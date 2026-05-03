@@ -5,6 +5,25 @@ import { Button } from '@/components/ui/button';
 import { useProjects } from '@/lib/ProjectsContext';
 import { toast } from 'sonner';
 
+const BOARD_WIDTH = 1400;
+const BOARD_HEIGHT = 900;
+const CARD_WIDTH = 320;
+const CARD_HEIGHT = 170;
+const DEFAULT_CARD_X = 80;
+const DEFAULT_CARD_Y = 80;
+const CARD_COLUMN_GAP = 360;
+const CARD_ROW_GAP = 220;
+const CARDS_PER_ROW = 3;
+
+function buildDefaultPosition(index) {
+  const column = index % CARDS_PER_ROW;
+  const row = Math.floor(index / CARDS_PER_ROW);
+  return {
+    x: DEFAULT_CARD_X + column * CARD_COLUMN_GAP,
+    y: DEFAULT_CARD_Y + row * CARD_ROW_GAP,
+  };
+}
+
 export default function SchemaBoard() {
   const navigate = useNavigate();
   const { projectId } = useParams();
@@ -32,9 +51,10 @@ export default function SchemaBoard() {
             const next = { ...current };
             (data.databases ?? []).forEach((database, index) => {
               if (!next[database.id]) {
+                const defaultPosition = buildDefaultPosition(index);
                 next[database.id] = {
-                  x: database.positionX ?? 80 + index * 180,
-                  y: database.positionY ?? 80 + (index % 2) * 120,
+                  x: database.positionX ?? defaultPosition.x,
+                  y: database.positionY ?? defaultPosition.y,
                 };
               }
             });
@@ -63,7 +83,8 @@ export default function SchemaBoard() {
 
   useEffect(() => {
     const handlePointerMove = (event) => {
-      if (!draggingRef.current) {
+      const dragState = draggingRef.current;
+      if (!dragState) {
         return;
       }
 
@@ -72,20 +93,20 @@ export default function SchemaBoard() {
         return;
       }
 
-      const nextX = event.clientX - bounds.left - draggingRef.current.offsetX;
-      const nextY = event.clientY - bounds.top - draggingRef.current.offsetY;
-      const deltaX = nextX - draggingRef.current.startX;
-      const deltaY = nextY - draggingRef.current.startY;
+      const nextX = event.clientX - bounds.left - dragState.offsetX;
+      const nextY = event.clientY - bounds.top - dragState.offsetY;
+      const deltaX = nextX - dragState.startX;
+      const deltaY = nextY - dragState.startY;
 
       if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) {
-        draggingRef.current.moved = true;
+        dragState.moved = true;
       }
 
       setDatabasePositions((current) => ({
         ...current,
-        [draggingRef.current.databaseID]: {
-          x: Math.max(0, Math.min(nextX, 1400 - 320)),
-          y: Math.max(0, Math.min(nextY, 900 - 170)),
+        [dragState.databaseID]: {
+          x: Math.max(0, Math.min(nextX, BOARD_WIDTH - CARD_WIDTH)),
+          y: Math.max(0, Math.min(nextY, BOARD_HEIGHT - CARD_HEIGHT)),
         },
       }));
     };
@@ -95,14 +116,18 @@ export default function SchemaBoard() {
         suppressDatabaseClickRef.current = true;
       }
       draggingRef.current = null;
+      document.body.style.userSelect = '';
     };
 
     window.addEventListener('mousemove', handlePointerMove);
     window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('blur', handlePointerUp);
 
     return () => {
       window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('blur', handlePointerUp);
+      document.body.style.userSelect = '';
     };
   }, []);
 
@@ -120,6 +145,19 @@ export default function SchemaBoard() {
     try {
       const data = await provisionPostgres(projectId);
       setProject(data);
+      setDatabasePositions((current) => {
+        const next = { ...current };
+        (data.databases ?? []).forEach((database, index) => {
+          if (!next[database.id]) {
+            const defaultPosition = buildDefaultPosition(index);
+            next[database.id] = {
+              x: database.positionX ?? defaultPosition.x,
+              y: database.positionY ?? defaultPosition.y,
+            };
+          }
+        });
+        return next;
+      });
       setMenu(null);
       toast.success('PostgreSQL database added to this project');
     } catch (error) {
@@ -134,6 +172,16 @@ export default function SchemaBoard() {
     try {
       const data = await removeProvisionedPostgres(projectId, databaseId);
       setProject(data);
+      setDatabasePositions((current) => {
+        const next = {};
+        const remainingIds = new Set((data.databases ?? []).map((database) => database.id));
+        Object.entries(current).forEach(([id, position]) => {
+          if (remainingIds.has(id)) {
+            next[id] = position;
+          }
+        });
+        return next;
+      });
       setMenu(null);
       toast.success('PostgreSQL database removed from this project');
     } catch (error) {
@@ -162,6 +210,8 @@ export default function SchemaBoard() {
       startY: position.y,
       moved: false,
     };
+    document.body.style.userSelect = 'none';
+    event.preventDefault();
   };
 
   const handleDatabaseClick = (databaseId) => {
@@ -170,6 +220,27 @@ export default function SchemaBoard() {
       return;
     }
     navigate(`/projects/${projectId}/databases/${databaseId}/schema`);
+  };
+
+  const handleDatabaseMouseUp = (event, databaseId) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const dragState = draggingRef.current;
+    if (!dragState || dragState.databaseID !== databaseId) {
+      return;
+    }
+
+    draggingRef.current = null;
+    document.body.style.userSelect = '';
+
+    if (dragState.moved) {
+      suppressDatabaseClickRef.current = true;
+      return;
+    }
+
+    handleDatabaseClick(databaseId);
   };
 
   return (
@@ -203,7 +274,7 @@ export default function SchemaBoard() {
           style={{ backgroundImage: 'radial-gradient(hsl(220 15% 14%) 1px, transparent 1px)', backgroundSize: '24px 24px' }}
           onContextMenu={handleContextMenu}
         >
-          <div className="relative" style={{ width: 1400, height: 900 }}>
+          <div className="relative" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT }}>
             {isLoadingProject ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 Loading project board...
@@ -214,10 +285,12 @@ export default function SchemaBoard() {
                 return (
                   <div
                     key={database.id}
+                    draggable={false}
                     className="group absolute w-80 cursor-grab rounded-2xl border border-border bg-card p-5 shadow-2xl shadow-black/20 transition-colors hover:border-primary/25 active:cursor-grabbing"
                     style={{ left: position.x, top: position.y }}
                     onMouseDown={(event) => handleDatabaseMouseDown(event, database.id)}
-                    onClick={() => handleDatabaseClick(database.id)}
+                    onMouseUp={(event) => handleDatabaseMouseUp(event, database.id)}
+                    onDragStart={(event) => event.preventDefault()}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">

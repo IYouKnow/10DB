@@ -129,13 +129,21 @@ func (s *Store) ListProjects(ctx context.Context, ownerUserID string) ([]types.P
 		if err != nil {
 			return nil, err
 		}
-		project.Databases, err = s.ListProjectDatabases(ctx, project.ID)
+		projects = append(projects, project)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for index := range projects {
+		databases, err := s.ListProjectDatabases(ctx, projects[index].ID)
 		if err != nil {
 			return nil, err
 		}
-		projects = append(projects, project)
+		projects[index].Databases = databases
 	}
-	return projects, rows.Err()
+
+	return projects, nil
 }
 
 func (s *Store) GetProject(ctx context.Context, ownerUserID, id string) (types.Project, error) {
