@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useApplySchema, useSqlPreview } from "../../api/sql";
 import { useProject } from "../../api/projects";
 import { useSaveSchema, useSchema, useValidateSchema } from "../../api/schemas";
+import { useApplySchema, useSqlPreview } from "../../api/sql";
 import { AppShell } from "../../components/layout/AppShell";
-import { ConnectionCard } from "../../features/projects/ConnectionCard";
 import { DataBrowser } from "../../features/data-browser/DataBrowser";
+import { ConnectionCard } from "../../features/projects/ConnectionCard";
 import { SchemaBuilder } from "../../features/schema-builder/SchemaBuilder";
 import { SqlPreviewCard } from "../../features/sql-preview/SqlPreviewCard";
 import { DEFAULT_BLUEPRINT } from "../../lib/constants";
@@ -51,21 +51,26 @@ export function ProjectDetailPage() {
   }
 
   return (
-    <AppShell title={project.data.name}>
-      <div className="space-y-6">
-        <section className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <Link to="/" className="text-sm font-semibold text-ember">
-              ← Back to projects
-            </Link>
-            <h1 className="mt-2 text-3xl font-black text-ink">{project.data.name}</h1>
-            <p className="text-slate-600">
-              {project.data.slug} · {project.data.pgDatabaseName} · {project.data.status}
-            </p>
+    <AppShell title={project.data.name} wide>
+      <div className="space-y-5">
+        <section className="rounded-[2rem] border border-white/45 bg-white/65 px-6 py-5 shadow-panel backdrop-blur">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <Link to="/" className="text-sm font-semibold text-ember">
+                Back to projects
+              </Link>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-ink">{project.data.name}</h1>
+              <p className="mt-2 max-w-4xl text-slate-600">
+                This screen is the schema board. Build the structure visually here, then use the smaller support panels below only when you need SQL, credentials, or table browsing.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">{project.data.slug}</span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">{project.data.status}</span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">{project.data.pgDatabaseName}</span>
+            </div>
           </div>
         </section>
-
-        <ConnectionCard projectId={projectId} />
 
         <SchemaBuilder
           blueprint={blueprint}
@@ -89,19 +94,25 @@ export function ProjectDetailPage() {
           validationErrors={validationErrors}
         />
 
-        <SqlPreviewCard
-          sql={sql}
-          isApplying={applySchema.isPending}
-          onApply={() =>
-            applySchema.mutate(undefined, {
-              onSuccess: () => {
-                void project.refetch();
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
+          <div className="space-y-6">
+            <SqlPreviewCard
+              sql={sql}
+              isApplying={applySchema.isPending}
+              onApply={() =>
+                applySchema.mutate(undefined, {
+                  onSuccess: () => {
+                    void project.refetch();
+                  }
+                })
               }
-            })
-          }
-        />
+            />
 
-        <DataBrowser projectId={projectId} />
+            <ConnectionCard projectId={projectId} />
+          </div>
+
+          <DataBrowser projectId={projectId} />
+        </div>
       </div>
     </AppShell>
   );

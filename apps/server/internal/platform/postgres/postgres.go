@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/pedro/10db-launch/apps/server/internal/models"
+	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
 type AdminConfig struct {
@@ -77,7 +77,7 @@ func (s *Service) DropProjectDatabase(ctx context.Context, databaseName, roleNam
 	return nil
 }
 
-func (s *Service) ResetProjectSchema(ctx context.Context, project models.Project, password string) error {
+func (s *Service) ResetProjectSchema(ctx context.Context, project types.Project, password string) error {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func (s *Service) ResetProjectSchema(ctx context.Context, project models.Project
 	return err
 }
 
-func (s *Service) ApplySQL(ctx context.Context, project models.Project, password, sql string) error {
+func (s *Service) ApplySQL(ctx context.Context, project types.Project, password, sql string) error {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (s *Service) ApplySQL(ctx context.Context, project models.Project, password
 	return err
 }
 
-func (s *Service) PublicTableCount(ctx context.Context, project models.Project, password string) (int, error) {
+func (s *Service) PublicTableCount(ctx context.Context, project types.Project, password string) (int, error) {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {
 		return 0, err
@@ -118,7 +118,7 @@ func (s *Service) PublicTableCount(ctx context.Context, project models.Project, 
 	return count, err
 }
 
-func (s *Service) ListTables(ctx context.Context, project models.Project, password string) ([]models.TableInfo, error) {
+func (s *Service) ListTables(ctx context.Context, project types.Project, password string) ([]types.TableInfo, error) {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {
 		return nil, err
@@ -134,9 +134,9 @@ func (s *Service) ListTables(ctx context.Context, project models.Project, passwo
 		return nil, err
 	}
 	defer rows.Close()
-	tables := make([]models.TableInfo, 0)
+	tables := make([]types.TableInfo, 0)
 	for rows.Next() {
-		var item models.TableInfo
+		var item types.TableInfo
 		if err := rows.Scan(&item.Name); err != nil {
 			return nil, err
 		}
@@ -145,7 +145,7 @@ func (s *Service) ListTables(ctx context.Context, project models.Project, passwo
 	return tables, rows.Err()
 }
 
-func (s *Service) ListColumns(ctx context.Context, project models.Project, password, tableName string) ([]models.ColumnInfo, error) {
+func (s *Service) ListColumns(ctx context.Context, project types.Project, password, tableName string) ([]types.ColumnInfo, error) {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {
 		return nil, err
@@ -161,9 +161,9 @@ func (s *Service) ListColumns(ctx context.Context, project models.Project, passw
 		return nil, err
 	}
 	defer rows.Close()
-	columns := make([]models.ColumnInfo, 0)
+	columns := make([]types.ColumnInfo, 0)
 	for rows.Next() {
-		var item models.ColumnInfo
+		var item types.ColumnInfo
 		var nullable string
 		if err := rows.Scan(&item.Name, &item.DataType, &nullable); err != nil {
 			return nil, err
@@ -174,16 +174,16 @@ func (s *Service) ListColumns(ctx context.Context, project models.Project, passw
 	return columns, rows.Err()
 }
 
-func (s *Service) ListRows(ctx context.Context, project models.Project, password, tableName string, limit, offset int) (models.TableRows, error) {
+func (s *Service) ListRows(ctx context.Context, project types.Project, password, tableName string, limit, offset int) (types.TableRows, error) {
 	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
 	if err != nil {
-		return models.TableRows{}, err
+		return types.TableRows{}, err
 	}
 	defer conn.Close(ctx)
 	query := fmt.Sprintf(`SELECT * FROM %s LIMIT %d OFFSET %d`, quoteIdent(tableName), limit, offset)
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
-		return models.TableRows{}, err
+		return types.TableRows{}, err
 	}
 	defer rows.Close()
 	fieldDescriptions := rows.FieldDescriptions()
@@ -195,7 +195,7 @@ func (s *Service) ListRows(ctx context.Context, project models.Project, password
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
-			return models.TableRows{}, err
+			return types.TableRows{}, err
 		}
 		row := map[string]any{}
 		for i, name := range columns {
@@ -203,12 +203,12 @@ func (s *Service) ListRows(ctx context.Context, project models.Project, password
 		}
 		items = append(items, row)
 	}
-	return models.TableRows{Columns: columns, Rows: items, Limit: limit, Offset: offset}, rows.Err()
+	return types.TableRows{Columns: columns, Rows: items, Limit: limit, Offset: offset}, rows.Err()
 }
 
-func BuildConnection(project models.Project, password string) models.ProjectConnection {
+func BuildConnection(project types.Project, password string) types.ProjectConnection {
 	dsn := buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode)
-	return models.ProjectConnection{
+	return types.ProjectConnection{
 		Host:     project.PGHost,
 		Port:     project.PGPort,
 		Database: project.PGDatabaseName,

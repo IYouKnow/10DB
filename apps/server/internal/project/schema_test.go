@@ -1,22 +1,22 @@
-package schema
+package project
 
 import (
 	"testing"
 
-	"github.com/pedro/10db-launch/apps/server/internal/models"
+	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
 func TestValidateBlueprint(t *testing.T) {
-	blueprint := models.SchemaBlueprint{
+	blueprint := types.SchemaBlueprint{
 		Version:   1,
 		ProjectID: "proj_1",
-		Tables: []models.TableBlueprint{
+		Tables: []types.TableBlueprint{
 			{
 				ID:   "tbl_users",
 				Name: "users",
-				Columns: []models.ColumnBlueprint{
-					{ID: "col_id", Name: "id", Type: "id", PrimaryKey: true, Unique: true, Nullable: false, Config: models.ColumnConfig{}},
-					{ID: "col_email", Name: "email", Type: "varchar", Nullable: false, Unique: true, Config: models.ColumnConfig{VarcharLength: 255}},
+				Columns: []types.ColumnBlueprint{
+					{ID: "col_id", Name: "id", Type: "id", PrimaryKey: true, Unique: true, Nullable: false, Config: types.ColumnConfig{}},
+					{ID: "col_email", Name: "email", Type: "varchar", Nullable: false, Unique: true, Config: types.ColumnConfig{VarcharLength: 255}},
 				},
 			},
 		},
@@ -29,12 +29,12 @@ func TestValidateBlueprint(t *testing.T) {
 }
 
 func TestValidateBlueprintRejectsBadIdentifiers(t *testing.T) {
-	blueprint := models.SchemaBlueprint{
+	blueprint := types.SchemaBlueprint{
 		Version: 1,
-		Tables: []models.TableBlueprint{
+		Tables: []types.TableBlueprint{
 			{
 				Name: "Users",
-				Columns: []models.ColumnBlueprint{
+				Columns: []types.ColumnBlueprint{
 					{Name: "Bad Name", Type: "text"},
 				},
 			},

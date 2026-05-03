@@ -2,8 +2,9 @@ import { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useLogout } from "../../api/auth";
 import { Button } from "../ui/Button";
+import { classNames } from "../../lib/format";
 
-export function AppShell({ title, children }: { title: string; children: ReactNode }) {
+export function AppShell({ title, children, wide = false }: { title: string; children: ReactNode; wide?: boolean }) {
   const logout = useLogout();
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(141,210,200,0.45),_transparent_35%),linear-gradient(180deg,_#eef5ff_0%,_#dbe7fb_100%)]">
@@ -20,7 +21,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className={classNames("mx-auto px-6 py-8", wide ? "max-w-[1700px]" : "max-w-7xl")}>{children}</main>
     </div>
   );
 }

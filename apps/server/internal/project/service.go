@@ -1,4 +1,4 @@
-package projects
+package project
 
 import (
 	"context"
@@ -10,22 +10,19 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/pedro/10db-launch/apps/server/internal/crypto"
-	"github.com/pedro/10db-launch/apps/server/internal/models"
-	"github.com/pedro/10db-launch/apps/server/internal/postgres"
-	"github.com/pedro/10db-launch/apps/server/internal/schema"
-	"github.com/pedro/10db-launch/apps/server/internal/sqlgen"
-	"github.com/pedro/10db-launch/apps/server/internal/store"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/crypto"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/postgres"
+	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
 type Service struct {
-	store    *store.Store
+	store    *Store
 	postgres *postgres.Service
 	crypto   *crypto.Service
 	pgConfig postgres.AdminConfig
 }
 
-func New(store *store.Store, postgresService *postgres.Service, cryptoService *crypto.Service, pgConfig postgres.AdminConfig) *Service {
+func New(store *Store, postgresService *postgres.Service, cryptoService *crypto.Service, pgConfig postgres.AdminConfig) *Service {
 	return &Service{store: store, postgres: postgresService, crypto: cryptoService, pgConfig: pgConfig}
 }
 
@@ -37,22 +34,22 @@ type CreateProjectInput struct {
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-func (s *Service) List(ctx context.Context) ([]models.Project, error) {
+func (s *Service) List(ctx context.Context) ([]types.Project, error) {
 	return s.store.ListProjects(ctx)
 }
 
-func (s *Service) Get(ctx context.Context, id string) (models.Project, error) {
+func (s *Service) Get(ctx context.Context, id string) (types.Project, error) {
 	return s.store.GetProject(ctx, id)
 }
 
-func (s *Service) Create(ctx context.Context, input CreateProjectInput) (models.Project, error) {
+func (s *Service) Create(ctx context.Context, input CreateProjectInput) (types.Project, error) {
 	name := strings.TrimSpace(input.Name)
 	slug := strings.TrimSpace(strings.ToLower(input.Slug))
 	if name == "" || slug == "" {
-		return models.Project{}, errors.New("name and slug are required")
+		return types.Project{}, errors.New("name and slug are required")
 	}
 	if !slugPattern.MatchString(slug) {
-		return models.Project{}, errors.New("slug must contain lowercase letters, numbers, and hyphens only")
+		return types.Project{}, errors.New("slug must contain lowercase letters, numbers, and hyphens only")
 	}
 
 	suffix := strings.ReplaceAll(uuid.NewString()[:8], "-", "")
@@ -60,20 +57,20 @@ func (s *Service) Create(ctx context.Context, input CreateProjectInput) (models.
 	roleName := fmt.Sprintf("u_%s_%s", strings.ReplaceAll(slug, "-", "_"), suffix)
 	password, err := crypto.GeneratePassword(24)
 	if err != nil {
-		return models.Project{}, err
+		return types.Project{}, err
 	}
 	encryptedPassword, err := s.crypto.Encrypt(password)
 	if err != nil {
-		return models.Project{}, err
+		return types.Project{}, err
 	}
 
 	now := time.Now().UTC()
-	project := models.Project{
+	project := types.Project{
 		ID:                  uuid.NewString(),
 		Name:                name,
 		Slug:                slug,
 		Description:         strings.TrimSpace(input.Description),
-		Status:              models.ProjectStatusCreating,
+		Status:              types.ProjectStatusCreating,
 		PGDatabaseName:      dbName,
 		PGRoleName:          roleName,
 		PGPasswordEncrypted: encryptedPassword,
@@ -84,71 +81,71 @@ func (s *Service) Create(ctx context.Context, input CreateProjectInput) (models.
 		UpdatedAt:           now,
 	}
 	if err := s.store.CreateProject(ctx, project); err != nil {
-		return models.Project{}, err
+		return types.Project{}, err
 	}
 	if err := s.postgres.CreateProjectDatabase(ctx, dbName, roleName, password); err != nil {
 		_ = s.store.DeleteProject(ctx, project.ID)
-		return models.Project{}, err
+		return types.Project{}, err
 	}
-	project.Status = models.ProjectStatusReady
+	project.Status = types.ProjectStatusReady
 	project.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateProject(ctx, project); err != nil {
-		return models.Project{}, err
+		return types.Project{}, err
 	}
 	return project, nil
 }
 
-func (s *Service) Connection(ctx context.Context, projectID string) (models.ProjectConnection, error) {
+func (s *Service) Connection(ctx context.Context, projectID string) (types.ProjectConnection, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
-		return models.ProjectConnection{}, err
+		return types.ProjectConnection{}, err
 	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
-		return models.ProjectConnection{}, err
+		return types.ProjectConnection{}, err
 	}
 	return postgres.BuildConnection(project, password), nil
 }
 
-func (s *Service) SaveSchema(ctx context.Context, projectID string, blueprint models.SchemaBlueprint) (models.SchemaRevision, map[string]string, error) {
-	blueprint = schema.Normalize(blueprint, projectID)
-	errs := schema.Validate(blueprint)
+func (s *Service) SaveSchema(ctx context.Context, projectID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
+	blueprint = Normalize(blueprint, projectID)
+	errs := Validate(blueprint)
 	if len(errs) > 0 {
-		return models.SchemaRevision{}, errs, nil
+		return types.SchemaRevision{}, errs, nil
 	}
-	hash, err := schema.HashBlueprint(blueprint)
+	hash, err := HashBlueprint(blueprint)
 	if err != nil {
-		return models.SchemaRevision{}, nil, err
+		return types.SchemaRevision{}, nil, err
 	}
-	sql, err := sqlgen.Generate(blueprint)
+	sql, err := Generate(blueprint)
 	if err != nil {
-		return models.SchemaRevision{}, nil, err
+		return types.SchemaRevision{}, nil, err
 	}
 	revision, err := s.store.SaveSchemaRevision(ctx, projectID, blueprint, hash, sql)
 	return revision, nil, err
 }
 
-func (s *Service) LatestSchema(ctx context.Context, projectID string) (models.SchemaRevision, error) {
+func (s *Service) LatestSchema(ctx context.Context, projectID string) (types.SchemaRevision, error) {
 	return s.store.GetLatestSchemaRevision(ctx, projectID)
 }
 
-func (s *Service) Revisions(ctx context.Context, projectID string) ([]models.SchemaRevision, error) {
+func (s *Service) Revisions(ctx context.Context, projectID string) ([]types.SchemaRevision, error) {
 	return s.store.ListSchemaRevisions(ctx, projectID)
 }
 
-func (s *Service) ValidateBlueprint(_ context.Context, projectID string, blueprint models.SchemaBlueprint) (models.SchemaBlueprint, map[string]string) {
-	blueprint = schema.Normalize(blueprint, projectID)
-	return blueprint, schema.Validate(blueprint)
+func (s *Service) ValidateBlueprint(_ context.Context, projectID string, blueprint types.SchemaBlueprint) (types.SchemaBlueprint, map[string]string) {
+	blueprint = Normalize(blueprint, projectID)
+	return blueprint, Validate(blueprint)
 }
 
-func (s *Service) PreviewSQL(ctx context.Context, projectID string, blueprint *models.SchemaBlueprint) (string, map[string]string, error) {
+func (s *Service) PreviewSQL(ctx context.Context, projectID string, blueprint *types.SchemaBlueprint) (string, map[string]string, error) {
 	if blueprint != nil {
-		normalized := schema.Normalize(*blueprint, projectID)
-		errs := schema.Validate(normalized)
+		normalized := Normalize(*blueprint, projectID)
+		errs := Validate(normalized)
 		if len(errs) > 0 {
 			return "", errs, nil
 		}
-		sql, err := sqlgen.Generate(normalized)
+		sql, err := Generate(normalized)
 		return sql, nil, err
 	}
 	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID)
@@ -158,28 +155,28 @@ func (s *Service) PreviewSQL(ctx context.Context, projectID string, blueprint *m
 	return revision.GeneratedSQL, nil, nil
 }
 
-func (s *Service) Apply(ctx context.Context, projectID string) (models.ApplyRun, error) {
+func (s *Service) Apply(ctx context.Context, projectID string) (types.ApplyRun, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	revision, err := s.store.GetLatestSchemaRevision(ctx, projectID)
 	if err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	tableCount, err := s.postgres.PublicTableCount(ctx, project, password)
 	if err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	if tableCount > 0 {
-		return models.ApplyRun{}, errors.New("schema apply only supports empty project schemas in v1; reset the project first")
+		return types.ApplyRun{}, errors.New("schema apply only supports empty project schemas in v1; reset the project first")
 	}
 	now := time.Now().UTC()
-	run := models.ApplyRun{
+	run := types.ApplyRun{
 		ID:               uuid.NewString(),
 		ProjectID:        projectID,
 		SchemaRevisionID: revision.ID,
@@ -188,14 +185,14 @@ func (s *Service) Apply(ctx context.Context, projectID string) (models.ApplyRun,
 		StartedAt:        now,
 	}
 	if err := s.store.CreateApplyRun(ctx, run); err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	if err := s.postgres.ApplySQL(ctx, project, password, revision.GeneratedSQL); err != nil {
 		finished := time.Now().UTC()
 		run.Status = "failed"
 		run.ErrorMessage = err.Error()
 		run.FinishedAt = &finished
-		project.Status = models.ProjectStatusApplyFailed
+		project.Status = types.ProjectStatusApplyFailed
 		project.UpdatedAt = finished
 		_ = s.store.UpdateProject(ctx, project)
 		_ = s.store.UpdateApplyRun(ctx, run)
@@ -204,14 +201,14 @@ func (s *Service) Apply(ctx context.Context, projectID string) (models.ApplyRun,
 	finished := time.Now().UTC()
 	run.Status = "success"
 	run.FinishedAt = &finished
-	project.Status = models.ProjectStatusReady
+	project.Status = types.ProjectStatusReady
 	project.LastAppliedRevisionID = &revision.ID
 	project.UpdatedAt = finished
 	if err := s.store.UpdateProject(ctx, project); err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	if err := s.store.UpdateApplyRun(ctx, run); err != nil {
-		return models.ApplyRun{}, err
+		return types.ApplyRun{}, err
 	}
 	return run, nil
 }
@@ -239,7 +236,7 @@ func (s *Service) Delete(ctx context.Context, projectID string) error {
 	return s.store.DeleteProject(ctx, project.ID)
 }
 
-func (s *Service) ListTables(ctx context.Context, projectID string) ([]models.TableInfo, error) {
+func (s *Service) ListTables(ctx context.Context, projectID string) ([]types.TableInfo, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -251,7 +248,7 @@ func (s *Service) ListTables(ctx context.Context, projectID string) ([]models.Ta
 	return s.postgres.ListTables(ctx, project, password)
 }
 
-func (s *Service) ListColumns(ctx context.Context, projectID, tableName string) ([]models.ColumnInfo, error) {
+func (s *Service) ListColumns(ctx context.Context, projectID, tableName string) ([]types.ColumnInfo, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -263,14 +260,14 @@ func (s *Service) ListColumns(ctx context.Context, projectID, tableName string) 
 	return s.postgres.ListColumns(ctx, project, password, tableName)
 }
 
-func (s *Service) ListRows(ctx context.Context, projectID, tableName string, limit, offset int) (models.TableRows, error) {
+func (s *Service) ListRows(ctx context.Context, projectID, tableName string, limit, offset int) (types.TableRows, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
-		return models.TableRows{}, err
+		return types.TableRows{}, err
 	}
 	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
 	if err != nil {
-		return models.TableRows{}, err
+		return types.TableRows{}, err
 	}
 	return s.postgres.ListRows(ctx, project, password, tableName, limit, offset)
 }

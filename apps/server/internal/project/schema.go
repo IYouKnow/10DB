@@ -1,4 +1,4 @@
-package schema
+package project
 
 import (
 	"crypto/sha256"
@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pedro/10db-launch/apps/server/internal/models"
+	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
 var identPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -27,11 +27,11 @@ var supportedTypes = map[string]struct{}{
 	"jsonb":     {},
 }
 
-func Normalize(bp models.SchemaBlueprint, projectID string) models.SchemaBlueprint {
+func Normalize(bp types.SchemaBlueprint, projectID string) types.SchemaBlueprint {
 	bp.Version = 1
 	bp.ProjectID = projectID
 	if bp.Tables == nil {
-		bp.Tables = []models.TableBlueprint{}
+		bp.Tables = []types.TableBlueprint{}
 	}
 	for i := range bp.Tables {
 		bp.Tables[i].Name = strings.TrimSpace(strings.ToLower(bp.Tables[i].Name))
@@ -42,7 +42,7 @@ func Normalize(bp models.SchemaBlueprint, projectID string) models.SchemaBluepri
 	return bp
 }
 
-func Validate(bp models.SchemaBlueprint) map[string]string {
+func Validate(bp types.SchemaBlueprint) map[string]string {
 	errs := map[string]string{}
 	if bp.Version != 1 {
 		errs["version"] = "only version 1 is supported"
@@ -101,7 +101,6 @@ func Validate(bp models.SchemaBlueprint) map[string]string {
 				errs[fkKey+".columnNames.0"] = "foreign key column does not exist"
 			}
 			if _, ok := tableNames[fk.RefTable]; !ok && fk.RefTable != table.Name {
-				// Full cross-table check runs after all tables are known.
 			}
 			if !slices.Contains([]string{"NO ACTION", "CASCADE", "SET NULL", "RESTRICT"}, strings.ToUpper(fk.OnDelete)) {
 				errs[fkKey+".onDelete"] = "invalid onDelete action"
@@ -112,7 +111,7 @@ func Validate(bp models.SchemaBlueprint) map[string]string {
 		}
 	}
 
-	tableByName := map[string]models.TableBlueprint{}
+	tableByName := map[string]types.TableBlueprint{}
 	for _, table := range bp.Tables {
 		tableByName[table.Name] = table
 	}
@@ -139,7 +138,7 @@ func Validate(bp models.SchemaBlueprint) map[string]string {
 	return errs
 }
 
-func HashBlueprint(bp models.SchemaBlueprint) (string, error) {
+func HashBlueprint(bp types.SchemaBlueprint) (string, error) {
 	raw, err := json.Marshal(bp)
 	if err != nil {
 		return "", err

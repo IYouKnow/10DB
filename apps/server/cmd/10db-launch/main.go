@@ -10,14 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pedro/10db-launch/apps/server/internal/api"
-	"github.com/pedro/10db-launch/apps/server/internal/auth"
-	"github.com/pedro/10db-launch/apps/server/internal/config"
-	"github.com/pedro/10db-launch/apps/server/internal/crypto"
-	"github.com/pedro/10db-launch/apps/server/internal/db"
-	"github.com/pedro/10db-launch/apps/server/internal/postgres"
-	"github.com/pedro/10db-launch/apps/server/internal/projects"
-	"github.com/pedro/10db-launch/apps/server/internal/store"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/auth"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/config"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/crypto"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/db"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/postgres"
+	"github.com/pedro/10db-launch/apps/server/internal/project"
+	"github.com/pedro/10db-launch/apps/server/internal/web"
 )
 
 func main() {
@@ -59,9 +58,9 @@ func main() {
 	}
 	defer pgService.Close()
 
-	store := store.New(sqliteDB)
+	store := project.NewStore(sqliteDB)
 	cryptoService := crypto.New(cfg.MasterKey)
-	projectService := projects.New(store, pgService, cryptoService, postgres.AdminConfig{
+	projectService := project.New(store, pgService, cryptoService, postgres.AdminConfig{
 		Host:     cfg.PGAdminHost,
 		Port:     cfg.PGAdminPort,
 		DBName:   cfg.PGAdminDB,
@@ -71,7 +70,7 @@ func main() {
 	})
 	authService := auth.New(cfg.AdminUsername, cfg.AdminPassword, cfg.MasterKey, cfg.AppBaseURL, cfg.SessionTTL)
 
-	handler := api.New(authService, projectService, cfg.AllowedOrigins)
+	handler := web.New(authService, projectService, cfg.AllowedOrigins)
 	server := &http.Server{
 		Addr:    cfg.AppAddr,
 		Handler: handler.Router(filepath.Join(".", "static")),

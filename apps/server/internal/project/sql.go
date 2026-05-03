@@ -1,16 +1,16 @@
-package sqlgen
+package project
 
 import (
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/pedro/10db-launch/apps/server/internal/models"
+	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
-func Generate(bp models.SchemaBlueprint) (string, error) {
+func Generate(bp types.SchemaBlueprint) (string, error) {
 	var statements []string
-	tables := append([]models.TableBlueprint(nil), bp.Tables...)
+	tables := append([]types.TableBlueprint(nil), bp.Tables...)
 	sort.Slice(tables, func(i, j int) bool { return tables[i].Name < tables[j].Name })
 
 	for _, table := range tables {
@@ -55,7 +55,7 @@ func Generate(bp models.SchemaBlueprint) (string, error) {
 	return "BEGIN;\nCREATE EXTENSION IF NOT EXISTS pgcrypto;\n" + strings.Join(statements, "\n") + "\nCOMMIT;\n", nil
 }
 
-func columnSQL(column models.ColumnBlueprint) (string, bool, bool, error) {
+func columnSQL(column types.ColumnBlueprint) (string, bool, bool, error) {
 	columnType, err := mapType(column)
 	if err != nil {
 		return "", false, false, err
@@ -65,12 +65,12 @@ func columnSQL(column models.ColumnBlueprint) (string, bool, bool, error) {
 		parts = append(parts, "NOT NULL")
 	}
 	if column.Default != nil && column.Type != "id" {
-		parts = append(parts, "DEFAULT "+defaultSQL(*column.Default, column.Type))
+		parts = append(parts, "DEFAULT "+defaultSQL(*column.Default))
 	}
 	return strings.Join(parts, " "), column.PrimaryKey || column.Type == "id", column.Unique, nil
 }
 
-func mapType(column models.ColumnBlueprint) (string, error) {
+func mapType(column types.ColumnBlueprint) (string, error) {
 	switch column.Type {
 	case "id":
 		return "BIGSERIAL", nil
@@ -97,7 +97,7 @@ func mapType(column models.ColumnBlueprint) (string, error) {
 	}
 }
 
-func defaultSQL(def models.DefaultValue, columnType string) string {
+func defaultSQL(def types.DefaultValue) string {
 	switch def.Kind {
 	case "expression":
 		return def.Value

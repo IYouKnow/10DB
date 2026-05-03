@@ -1,4 +1,4 @@
-package api
+package web
 
 import (
 	"context"
@@ -14,19 +14,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/pedro/10db-launch/apps/server/internal/auth"
-	"github.com/pedro/10db-launch/apps/server/internal/httpx"
-	"github.com/pedro/10db-launch/apps/server/internal/models"
-	"github.com/pedro/10db-launch/apps/server/internal/projects"
+	"github.com/pedro/10db-launch/apps/server/internal/platform/auth"
+	"github.com/pedro/10db-launch/apps/server/internal/project"
+	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
 type Handler struct {
 	auth     *auth.Service
-	projects *projects.Service
+	projects *project.Service
 	origins  []string
 }
 
-func New(authService *auth.Service, projectService *projects.Service, allowedOrigins []string) *Handler {
+func New(authService *auth.Service, projectService *project.Service, allowedOrigins []string) *Handler {
 	return &Handler{auth: authService, projects: projectService, origins: allowedOrigins}
 }
 
@@ -39,10 +38,10 @@ func (h *Handler) Router(staticDir string) http.Handler {
 	r.Use(middleware.Timeout(60 * time.Second))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
+		JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
 	r.Route("/api/v1", func(api chi.Router) {
@@ -116,185 +115,185 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := httpx.Decode(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+	if err := Decode(r, &body); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
 	if !h.auth.Login(body.Username, body.Password) {
-		httpx.Error(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials", nil)
+		Error(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials", nil)
 		return
 	}
 	cookie, err := h.auth.CreateCookie()
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "session_error", err.Error(), nil)
+		Error(w, http.StatusInternalServerError, "session_error", err.Error(), nil)
 		return
 	}
 	http.SetCookie(w, cookie)
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, h.auth.ClearCookie())
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	session, err := h.auth.Verify(r)
 	if err != nil {
-		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"username": session.Username})
+	JSON(w, http.StatusOK, map[string]any{"username": session.Username})
 }
 
 func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
 	projects, err := h.projects.List(r.Context())
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "list_projects_failed", err.Error(), nil)
+		Error(w, http.StatusInternalServerError, "list_projects_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"projects": projects})
+	JSON(w, http.StatusOK, map[string]any{"projects": projects})
 }
 
 func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
-	var body projects.CreateProjectInput
-	if err := httpx.Decode(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+	var body project.CreateProjectInput
+	if err := Decode(r, &body); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
 	project, err := h.projects.Create(r.Context(), body)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "create_project_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "create_project_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, project)
+	JSON(w, http.StatusCreated, project)
 }
 
 func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
 	project, err := h.projects.Get(r.Context(), chi.URLParam(r, "projectID"))
 	if err != nil {
-		httpx.Error(w, http.StatusNotFound, "project_not_found", err.Error(), nil)
+		Error(w, http.StatusNotFound, "project_not_found", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, project)
+	JSON(w, http.StatusOK, project)
 }
 
 func (h *Handler) deleteProject(w http.ResponseWriter, r *http.Request) {
 	if err := h.projects.Delete(r.Context(), chi.URLParam(r, "projectID")); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "delete_project_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "delete_project_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) resetProject(w http.ResponseWriter, r *http.Request) {
 	if err := h.projects.Reset(r.Context(), chi.URLParam(r, "projectID")); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "reset_project_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "reset_project_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) projectConnection(w http.ResponseWriter, r *http.Request) {
 	connection, err := h.projects.Connection(r.Context(), chi.URLParam(r, "projectID"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "connection_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "connection_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, connection)
+	JSON(w, http.StatusOK, connection)
 }
 
 func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {
 	revision, err := h.projects.LatestSchema(r.Context(), chi.URLParam(r, "projectID"))
 	if err != nil {
-		httpx.JSON(w, http.StatusOK, models.SchemaBlueprint{Version: 1, ProjectID: chi.URLParam(r, "projectID"), Tables: []models.TableBlueprint{}})
+		JSON(w, http.StatusOK, types.SchemaBlueprint{Version: 1, ProjectID: chi.URLParam(r, "projectID"), Tables: []types.TableBlueprint{}})
 		return
 	}
-	httpx.JSON(w, http.StatusOK, revision)
+	JSON(w, http.StatusOK, revision)
 }
 
 func (h *Handler) putSchema(w http.ResponseWriter, r *http.Request) {
-	var blueprint models.SchemaBlueprint
-	if err := httpx.Decode(r, &blueprint); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+	var blueprint types.SchemaBlueprint
+	if err := Decode(r, &blueprint); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
 	revision, validationErrors, err := h.projects.SaveSchema(r.Context(), chi.URLParam(r, "projectID"), blueprint)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "save_schema_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "save_schema_failed", err.Error(), nil)
 		return
 	}
 	if len(validationErrors) > 0 {
-		httpx.Error(w, http.StatusBadRequest, "invalid_schema", "schema validation failed", validationErrors)
+		Error(w, http.StatusBadRequest, "invalid_schema", "schema validation failed", validationErrors)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, revision)
+	JSON(w, http.StatusOK, revision)
 }
 
 func (h *Handler) validateSchema(w http.ResponseWriter, r *http.Request) {
-	var blueprint models.SchemaBlueprint
-	if err := httpx.Decode(r, &blueprint); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
+	var blueprint types.SchemaBlueprint
+	if err := Decode(r, &blueprint); err != nil {
+		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
 	normalized, errs := h.projects.ValidateBlueprint(r.Context(), chi.URLParam(r, "projectID"), blueprint)
-	httpx.JSON(w, http.StatusOK, map[string]any{"blueprint": normalized, "errors": errs, "valid": len(errs) == 0})
+	JSON(w, http.StatusOK, map[string]any{"blueprint": normalized, "errors": errs, "valid": len(errs) == 0})
 }
 
 func (h *Handler) sqlPreview(w http.ResponseWriter, r *http.Request) {
-	var blueprint *models.SchemaBlueprint
+	var blueprint *types.SchemaBlueprint
 	if r.ContentLength > 0 {
-		var body models.SchemaBlueprint
-		if err := httpx.Decode(r, &body); err == nil {
+		var body types.SchemaBlueprint
+		if err := Decode(r, &body); err == nil {
 			blueprint = &body
 		}
 	}
 	sql, errs, err := h.projects.PreviewSQL(r.Context(), chi.URLParam(r, "projectID"), blueprint)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "sql_preview_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "sql_preview_failed", err.Error(), nil)
 		return
 	}
 	if len(errs) > 0 {
-		httpx.Error(w, http.StatusBadRequest, "invalid_schema", "schema validation failed", errs)
+		Error(w, http.StatusBadRequest, "invalid_schema", "schema validation failed", errs)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"sql": sql})
+	JSON(w, http.StatusOK, map[string]any{"sql": sql})
 }
 
 func (h *Handler) applySchema(w http.ResponseWriter, r *http.Request) {
 	run, err := h.projects.Apply(r.Context(), chi.URLParam(r, "projectID"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "apply_failed", err.Error(), run)
+		Error(w, http.StatusBadRequest, "apply_failed", err.Error(), run)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, run)
+	JSON(w, http.StatusOK, run)
 }
 
 func (h *Handler) schemaRevisions(w http.ResponseWriter, r *http.Request) {
 	revisions, err := h.projects.Revisions(r.Context(), chi.URLParam(r, "projectID"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "list_revisions_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "list_revisions_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"revisions": revisions})
+	JSON(w, http.StatusOK, map[string]any{"revisions": revisions})
 }
 
 func (h *Handler) listTables(w http.ResponseWriter, r *http.Request) {
 	tables, err := h.projects.ListTables(r.Context(), chi.URLParam(r, "projectID"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "list_tables_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "list_tables_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"tables": tables})
+	JSON(w, http.StatusOK, map[string]any{"tables": tables})
 }
 
 func (h *Handler) listColumns(w http.ResponseWriter, r *http.Request) {
 	columns, err := h.projects.ListColumns(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tableName"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "list_columns_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "list_columns_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"columns": columns})
+	JSON(w, http.StatusOK, map[string]any{"columns": columns})
 }
 
 func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
@@ -312,10 +311,10 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.projects.ListRows(r.Context(), chi.URLParam(r, "projectID"), chi.URLParam(r, "tableName"), limit, offset)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "list_rows_failed", err.Error(), nil)
+		Error(w, http.StatusBadRequest, "list_rows_failed", err.Error(), nil)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, rows)
+	JSON(w, http.StatusOK, rows)
 }
 
 type spaFS struct {
@@ -337,7 +336,7 @@ func (s spaFS) Open(name string) (fs.File, error) {
 func WithReadyCheck(next http.Handler, checker func(context.Context) error) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := checker(r.Context()); err != nil {
-			httpx.Error(w, http.StatusServiceUnavailable, "not_ready", err.Error(), nil)
+			Error(w, http.StatusServiceUnavailable, "not_ready", err.Error(), nil)
 			return
 		}
 		next.ServeHTTP(w, r)
