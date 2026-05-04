@@ -1,6 +1,7 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
+    container_name: 10db-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PG_ADMIN_USER:-postgres}
@@ -13,21 +14,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks:
-      - app_net
 
   app:
     build:
-      context: ../..
-      dockerfile: deploy/docker/server.Dockerfile
+      context: .
+      dockerfile: Dockerfile
+    container_name: 10db-launch
     restart: unless-stopped
-    env_file:
-      - ../../.env
-    ports:
-      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      APP_ADDR: ":8080"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:8080}
+      APP_MASTER_KEY: ${APP_MASTER_KEY}
+      APP_SESSION_TTL_HOURS: ${APP_SESSION_TTL_HOURS:-24}
+      CONTROL_DB_PATH: /data/10db-launch.sqlite
+      PG_ADMIN_HOST: postgres
+      PG_ADMIN_PORT: 5432
+      PG_ADMIN_DB: ${PG_ADMIN_DB:-postgres}
+      PG_ADMIN_USER: ${PG_ADMIN_USER:-postgres}
+      PG_ADMIN_PASSWORD: ${PG_ADMIN_PASSWORD}
+      PG_SSL_MODE: ${PG_SSL_MODE:-disable}
     volumes:
       - app_data:/data
     healthcheck:
@@ -35,12 +46,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
-    networks:
-      - app_net
 
 volumes:
   postgres_data:
   app_data:
-
-networks:
-  app_net:

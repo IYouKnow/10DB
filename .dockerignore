@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+node_modules
+apps/web/node_modules
+apps/web/dist
+apps/server/data
+tmp
+coverage
+docs
