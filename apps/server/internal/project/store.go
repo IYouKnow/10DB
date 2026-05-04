@@ -153,6 +153,12 @@ func (s *Store) ListProjects(ctx context.Context, ownerUserID string) ([]types.P
 	return projects, nil
 }
 
+func (s *Store) CountProjectsByOwner(ctx context.Context, ownerUserID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE owner_user_id = ?`, ownerUserID).Scan(&count)
+	return count, err
+}
+
 func (s *Store) GetProject(ctx context.Context, ownerUserID, id string) (types.Project, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, name, slug, description, status, pg_database_name, pg_role_name, pg_password_encrypted,
@@ -248,6 +254,12 @@ func (s *Store) ListProjectDatabases(ctx context.Context, projectID string) ([]t
 		databases = append(databases, database)
 	}
 	return databases, rows.Err()
+}
+
+func (s *Store) CountProjectDatabases(ctx context.Context, projectID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases WHERE project_id = ?`, projectID).Scan(&count)
+	return count, err
 }
 
 func (s *Store) GetProjectDatabase(ctx context.Context, projectID, databaseID string) (types.ProjectDatabase, error) {

@@ -24,6 +24,7 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			email TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'user',
 			password_hash TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -34,6 +35,10 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			return err
 		}
+	}
+
+	if err := ensureColumn(ctx, s.db, "users", "role", "TEXT NOT NULL DEFAULT 'user'"); err != nil {
+		return err
 	}
 
 	exists, err := s.columnExists(ctx, "projects", "owner_user_id")
@@ -55,12 +60,13 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 
 func (s *Store) Create(ctx context.Context, user types.User) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (id, email, name, password_hash, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO users (id, email, name, role, password_hash, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`,
 		user.ID,
 		user.Email,
 		user.Name,
+		user.Role,
 		user.PasswordHash,
 		user.CreatedAt.Format(time.RFC3339Nano),
 		user.UpdatedAt.Format(time.RFC3339Nano),
@@ -70,7 +76,7 @@ func (s *Store) Create(ctx context.Context, user types.User) error {
 
 func (s *Store) GetByEmail(ctx context.Context, email string) (types.User, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, email, name, password_hash, created_at, updated_at
+		SELECT id, email, name, role, password_hash, created_at, updated_at
 		FROM users
 		WHERE email = ?
 	`, strings.ToLower(strings.TrimSpace(email)))
@@ -79,7 +85,7 @@ func (s *Store) GetByEmail(ctx context.Context, email string) (types.User, error
 
 func (s *Store) GetByID(ctx context.Context, id string) (types.User, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, email, name, password_hash, created_at, updated_at
+		SELECT id, email, name, role, password_hash, created_at, updated_at
 		FROM users
 		WHERE id = ?
 	`, id)
@@ -116,7 +122,7 @@ func (s *Store) columnExists(ctx context.Context, tableName, columnName string) 
 func scanUser(scanner interface{ Scan(dest ...any) error }) (types.User, error) {
 	var user types.User
 	var createdAt, updatedAt string
-	if err := scanner.Scan(&user.ID, &user.Email, &user.Name, &user.PasswordHash, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.PasswordHash, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return types.User{}, err
 		}
@@ -125,4 +131,35 @@ func scanUser(scanner interface{ Scan(dest ...any) error }) (types.User, error) 
 	user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	user.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
 	return user, nil
+}
+
+func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, columnDef string) error {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+tableName+`)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = db.ExecContext(ctx, `ALTER TABLE `+tableName+` ADD COLUMN `+columnName+` `+columnDef)
+	return err
 }

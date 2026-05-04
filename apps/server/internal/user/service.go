@@ -51,6 +51,7 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (t
 		ID:           uuid.NewString(),
 		Email:        normalizedEmail,
 		Name:         normalizedName,
+		Role:         types.UserRoleUser,
 		PasswordHash: string(hash),
 		CreatedAt:    now,
 		UpdatedAt:    now,

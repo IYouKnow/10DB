@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -149,6 +150,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		"id":    user.ID,
 		"email": user.Email,
 		"name":  user.Name,
+		"role":  user.Role,
 	}})
 }
 
@@ -177,6 +179,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		"id":    user.ID,
 		"email": user.Email,
 		"name":  user.Name,
+		"role":  user.Role,
 	}})
 }
 
@@ -191,10 +194,16 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
 		return
 	}
+	userRecord, err := h.users.GetByID(r.Context(), session.UserID)
+	if err != nil {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
 	JSON(w, http.StatusOK, map[string]any{
-		"id":    session.UserID,
-		"email": session.UserEmail,
-		"name":  session.UserName,
+		"id":    userRecord.ID,
+		"email": userRecord.Email,
+		"name":  userRecord.Name,
+		"role":  userRecord.Role,
 	})
 }
 
@@ -223,12 +232,17 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "invalid_json", "invalid request body", nil)
 		return
 	}
-	project, err := h.projects.Create(r.Context(), session.UserID, body)
+	createdProject, err := h.projects.Create(r.Context(), session.UserID, body)
 	if err != nil {
-		Error(w, http.StatusBadRequest, "create_project_failed", err.Error(), nil)
+		status := http.StatusBadRequest
+		var limitErr *project.LimitError
+		if errors.As(err, &limitErr) {
+			status = http.StatusForbidden
+		}
+		Error(w, status, "create_project_failed", err.Error(), nil)
 		return
 	}
-	JSON(w, http.StatusCreated, project)
+	JSON(w, http.StatusCreated, createdProject)
 }
 
 func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
@@ -258,12 +272,17 @@ func (h *Handler) provisionPostgres(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	project, err := h.projects.ProvisionPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"), body)
+	updatedProject, err := h.projects.ProvisionPostgres(r.Context(), session.UserID, chi.URLParam(r, "projectID"), body)
 	if err != nil {
-		Error(w, http.StatusBadRequest, "provision_postgres_failed", err.Error(), nil)
+		status := http.StatusBadRequest
+		var limitErr *project.LimitError
+		if errors.As(err, &limitErr) {
+			status = http.StatusForbidden
+		}
+		Error(w, status, "provision_postgres_failed", err.Error(), nil)
 		return
 	}
-	JSON(w, http.StatusOK, project)
+	JSON(w, http.StatusOK, updatedProject)
 }
 
 func (h *Handler) updateProjectDatabase(w http.ResponseWriter, r *http.Request) {

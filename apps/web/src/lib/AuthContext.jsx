@@ -17,8 +17,14 @@ async function request(path, options = {}) {
     let code = '';
     try {
       const body = await response.json();
-      message = body?.error || message;
+      message = body?.message || body?.error || body?.error?.message || message;
       code = body?.code || '';
+      if (body?.details && typeof body.details === 'object') {
+        const firstDetail = Object.values(body.details).find((value) => typeof value === 'string');
+        if (firstDetail) {
+          message = String(firstDetail);
+        }
+      }
     } catch {
       // Keep fallback values when the response is not JSON.
     }

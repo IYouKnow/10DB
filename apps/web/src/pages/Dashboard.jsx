@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [createProjectError, setCreateProjectError] = useState('');
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const {
@@ -27,12 +28,15 @@ export default function Dashboard() {
   );
 
   const handleCreate = async ({ name }) => {
+    setCreateProjectError('');
     setIsCreatingProject(true);
 
     try {
       const project = await createProject({ name });
       setShowCreate(false);
       navigate(`/projects/${project.id}/board`);
+    } catch (error) {
+      setCreateProjectError(error.message || 'Failed to create project');
     } finally {
       setIsCreatingProject(false);
     }
@@ -137,9 +141,13 @@ export default function Dashboard() {
 
         {showCreate && (
           <CreateProjectModal
-            onClose={() => setShowCreate(false)}
+            onClose={() => {
+              setCreateProjectError('');
+              setShowCreate(false);
+            }}
             onCreate={handleCreate}
             isCreating={isCreatingProject}
+            error={createProjectError}
           />
         )}
       </main>

@@ -9,7 +9,7 @@ function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 }
 
-export default function CreateProjectModal({ onClose, onCreate, isCreating = false }) {
+export default function CreateProjectModal({ onClose, onCreate, isCreating = false, error = '' }) {
   const [name, setName] = useState('');
   const [template, setTemplate] = useState('blank');
 
@@ -81,6 +81,12 @@ export default function CreateProjectModal({ onClose, onCreate, isCreating = fal
               ))}
             </div>
           </div>
+
+          {error && (
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">

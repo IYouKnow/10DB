@@ -53,10 +53,16 @@ type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
 	Name         string    `json:"name"`
+	Role         string    `json:"role"`
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
+
+const (
+	UserRoleAdmin = "admin"
+	UserRoleUser  = "user"
+)
 
 type ProjectConnection struct {
 	Host       string `json:"host"`
@@ -92,10 +98,10 @@ type ApplyRun struct {
 }
 
 type SchemaBlueprint struct {
-	Version   int              `json:"version"`
-	ProjectID string           `json:"projectId"`
-	DatabaseID string          `json:"databaseId"`
-	Tables    []TableBlueprint `json:"tables"`
+	Version    int              `json:"version"`
+	ProjectID  string           `json:"projectId"`
+	DatabaseID string           `json:"databaseId"`
+	Tables     []TableBlueprint `json:"tables"`
 }
 
 type Position struct {

@@ -69,7 +69,7 @@ func main() {
 	}
 	userService := user.New(userStore)
 	cryptoService := crypto.New(cfg.MasterKey)
-	projectService := project.New(store, pgService, cryptoService, postgres.AdminConfig{
+	projectService := project.New(store, userService, pgService, cryptoService, postgres.AdminConfig{
 		Host:     cfg.PGAdminHost,
 		Port:     cfg.PGAdminPort,
 		DBName:   cfg.PGAdminDB,

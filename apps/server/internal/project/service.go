@@ -15,15 +15,31 @@ import (
 	types "github.com/pedro/10db-launch/apps/server/internal/types"
 )
 
+type userReader interface {
+	GetByID(ctx context.Context, id string) (types.User, error)
+}
+
+type postgresProvider interface {
+	CreateProjectDatabase(ctx context.Context, databaseName, roleName, password string) error
+	DropProjectDatabase(ctx context.Context, databaseName, roleName string) error
+	ResetProjectSchema(ctx context.Context, project types.Project, password string) error
+	ApplySQL(ctx context.Context, project types.Project, password, sql string) error
+	DropTable(ctx context.Context, project types.Project, password, tableName string) error
+	ListTables(ctx context.Context, project types.Project, password string) ([]types.TableInfo, error)
+	ListColumns(ctx context.Context, project types.Project, password, tableName string) ([]types.ColumnInfo, error)
+	ListRows(ctx context.Context, project types.Project, password, tableName string, limit, offset int) (types.TableRows, error)
+}
+
 type Service struct {
 	store    *Store
-	postgres *postgres.Service
+	users    userReader
+	postgres postgresProvider
 	crypto   *crypto.Service
 	pgConfig postgres.AdminConfig
 }
 
-func New(store *Store, postgresService *postgres.Service, cryptoService *crypto.Service, pgConfig postgres.AdminConfig) *Service {
-	return &Service{store: store, postgres: postgresService, crypto: cryptoService, pgConfig: pgConfig}
+func New(store *Store, users userReader, postgresService postgresProvider, cryptoService *crypto.Service, pgConfig postgres.AdminConfig) *Service {
+	return &Service{store: store, users: users, postgres: postgresService, crypto: cryptoService, pgConfig: pgConfig}
 }
 
 type CreateProjectInput struct {
@@ -67,6 +83,19 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, input CreatePr
 	if !slugPattern.MatchString(slug) {
 		return types.Project{}, errors.New("slug must contain lowercase letters, numbers, and hyphens only")
 	}
+	isAdmin, err := s.isAdmin(ctx, ownerUserID)
+	if err != nil {
+		return types.Project{}, err
+	}
+	if !isAdmin {
+		projectCount, err := s.store.CountProjectsByOwner(ctx, ownerUserID)
+		if err != nil {
+			return types.Project{}, err
+		}
+		if projectCount >= MaxProjectsPerUser {
+			return types.Project{}, NewLimitError("Project limit reached. Normal users can create 1 project.")
+		}
+	}
 
 	now := time.Now().UTC()
 	project := types.Project{
@@ -95,6 +124,19 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
 	if err != nil {
 		return types.Project{}, err
+	}
+	isAdmin, err := s.isAdmin(ctx, ownerUserID)
+	if err != nil {
+		return types.Project{}, err
+	}
+	if !isAdmin {
+		databaseCount, err := s.store.CountProjectDatabases(ctx, project.ID)
+		if err != nil {
+			return types.Project{}, err
+		}
+		if databaseCount >= MaxDatabasesPerProject {
+			return types.Project{}, NewLimitError("Database limit reached. Each project can have up to 3 databases.")
+		}
 	}
 
 	suffix := strings.ReplaceAll(uuid.NewString()[:8], "-", "")
@@ -163,6 +205,14 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 		return types.Project{}, err
 	}
 	return s.store.GetProject(ctx, ownerUserID, projectID)
+}
+
+func (s *Service) isAdmin(ctx context.Context, userID string) (bool, error) {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return user.Role == types.UserRoleAdmin, nil
 }
 
 func (s *Service) UpdateProjectDatabase(ctx context.Context, ownerUserID, projectID, databaseID string, input UpdateProjectDatabaseInput) (types.Project, error) {
