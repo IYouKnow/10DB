@@ -12,26 +12,50 @@ Self-hosted visual PostgreSQL launchpad for creating isolated project databases,
 
 ## Docker / CasaOS
 
-The repo now includes a root `docker-compose.yml` and `Dockerfile` so you can run it directly in Docker or import it into CasaOS.
+The repo now includes:
+- a root `Dockerfile` for building the app image
+- a root `docker-compose.yml` for running only the `10db` app container
+- a GitHub Actions workflow that publishes the image automatically
+
+`10db` expects an existing PostgreSQL server. It does not need to run PostgreSQL in the same Compose file.
 
 1. Copy `.env.example` to `.env`
 2. Set at least:
    - `APP_MASTER_KEY`
+   - `PG_ADMIN_HOST`
    - `PG_ADMIN_PASSWORD`
    - `APP_BASE_URL`
    - `APP_ALLOWED_ORIGINS`
 3. Start the stack:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 The app will be available on `http://localhost:8080`.
 
 Notes:
 - The app stores its control SQLite DB in the `app_data` volume at `/data/10db-launch.sqlite`
-- PostgreSQL data is stored in the `postgres_data` volume
-- Inside Docker, the app automatically connects to PostgreSQL using `PG_ADMIN_HOST=postgres`
+- PostgreSQL is external to this Compose file
+- In CasaOS, import or configure only the `10db` app container and point `PG_ADMIN_HOST` to your existing PostgreSQL server
+- By default, Compose pulls `ghcr.io/iyouknow/10db:v0.1.0`
+- To use another published tag, set `APP_IMAGE`, for example `APP_IMAGE=ghcr.io/iyouknow/10db:latest`
+
+## GitHub Actions Image Publishing
+
+The workflow at `.github/workflows/docker-publish.yml` publishes the app image to `ghcr.io/iyouknow/10db`.
+
+It runs on:
+- pushes to `main`
+- pushes of tags like `v0.1.0`
+- manual runs from the Actions tab
+
+Published tags include:
+- `latest` for the default branch
+- the git tag name, like `v0.1.0`
+- a `sha-...` tag for traceability
+
+For CasaOS, use the published image instead of a source build.
 
 ## Git Tags
 

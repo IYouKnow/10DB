@@ -1,29 +1,9 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: 10db-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${PG_ADMIN_USER:-postgres}
-      POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:-postgres}
-      POSTGRES_DB: ${PG_ADMIN_DB:-postgres}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_ADMIN_USER:-postgres} -d ${PG_ADMIN_DB:-postgres}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-ghcr.io/iyouknow/10db:v0.1.0}
     container_name: 10db-launch
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+    pull_policy: always
     ports:
       - "8080:8080"
     environment:
@@ -33,8 +13,8 @@ services:
       APP_MASTER_KEY: ${APP_MASTER_KEY}
       APP_SESSION_TTL_HOURS: ${APP_SESSION_TTL_HOURS:-24}
       CONTROL_DB_PATH: /data/10db-launch.sqlite
-      PG_ADMIN_HOST: postgres
-      PG_ADMIN_PORT: 5432
+      PG_ADMIN_HOST: ${PG_ADMIN_HOST}
+      PG_ADMIN_PORT: ${PG_ADMIN_PORT:-5432}
       PG_ADMIN_DB: ${PG_ADMIN_DB:-postgres}
       PG_ADMIN_USER: ${PG_ADMIN_USER:-postgres}
       PG_ADMIN_PASSWORD: ${PG_ADMIN_PASSWORD}
@@ -48,5 +28,4 @@ services:
       retries: 10
 
 volumes:
-  postgres_data:
   app_data:
