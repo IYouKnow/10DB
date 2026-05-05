@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -86,8 +86,7 @@ func (h *Handler) Router(staticDir string) http.Handler {
 	})
 
 	if _, err := os.Stat(path.Join(staticDir, "index.html")); err == nil {
-		fileServer := http.FileServer(http.FS(spaFS{os.DirFS(staticDir)}))
-		r.Handle("/*", fileServer)
+		r.Handle("/*", spaHandler(staticDir))
 	} else {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -120,6 +119,27 @@ func (h *Handler) Router(staticDir string) http.Handler {
 		})
 	}
 	return r
+}
+
+func spaHandler(staticDir string) http.Handler {
+	indexPath := filepath.Join(staticDir, "index.html")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cleanPath := path.Clean("/" + r.URL.Path)
+		relativePath := strings.TrimPrefix(cleanPath, "/")
+		if relativePath == "" || relativePath == "." {
+			http.ServeFile(w, r, indexPath)
+			return
+		}
+
+		assetPath := filepath.Join(staticDir, filepath.FromSlash(relativePath))
+		if info, err := os.Stat(assetPath); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, assetPath)
+			return
+		}
+
+		http.ServeFile(w, r, indexPath)
+	})
 }
 
 func (h *Handler) requireAuth(next http.Handler) http.Handler {
@@ -594,22 +614,6 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, http.StatusOK, rows)
-}
-
-type spaFS struct {
-	fs fs.FS
-}
-
-func (s spaFS) Open(name string) (fs.File, error) {
-	clean := path.Clean(strings.TrimPrefix(name, "/"))
-	if clean == "." || clean == "" {
-		clean = "index.html"
-	}
-	file, err := s.fs.Open(clean)
-	if err == nil {
-		return file, nil
-	}
-	return s.fs.Open("index.html")
 }
 
 func WithReadyCheck(next http.Handler, checker func(context.Context) error) http.Handler {
