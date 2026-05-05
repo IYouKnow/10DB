@@ -1,31 +1,103 @@
+name: 10db
+
 services:
   app:
-    image: ${APP_IMAGE:-ghcr.io/iyouknow/10db:v0.1.0}
     container_name: 10db-launch
+    image: ghcr.io/iyouknow/10db:latest
     restart: unless-stopped
-    pull_policy: always
     ports:
       - "8080:8080"
     environment:
       APP_ADDR: ":8080"
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
-      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:8080}
-      APP_MASTER_KEY: ${APP_MASTER_KEY}
-      APP_SESSION_TTL_HOURS: ${APP_SESSION_TTL_HOURS:-24}
-      CONTROL_DB_PATH: /data/10db-launch.sqlite
-      PG_ADMIN_HOST: ${PG_ADMIN_HOST}
-      PG_ADMIN_PORT: ${PG_ADMIN_PORT:-5432}
-      PG_ADMIN_DB: ${PG_ADMIN_DB:-postgres}
-      PG_ADMIN_USER: ${PG_ADMIN_USER:-postgres}
-      PG_ADMIN_PASSWORD: ${PG_ADMIN_PASSWORD}
-      PG_SSL_MODE: ${PG_SSL_MODE:-disable}
+      APP_BASE_URL: "http://YOUR-HOST-IP:8080"
+      APP_ALLOWED_ORIGINS: "http://YOUR-HOST-IP:8080"
+      APP_MASTER_KEY: "CHANGE_ME_TO_A_RANDOM_SECRET"
+      APP_SESSION_TTL_HOURS: "24"
+      CONTROL_DB_PATH: "/data/10db-launch.sqlite"
+      PG_ADMIN_HOST: "CHANGE_ME_TO_YOUR_POSTGRES_HOST"
+      PG_ADMIN_PORT: "5432"
+      PG_ADMIN_DB: "postgres"
+      PG_ADMIN_USER: "postgres"
+      PG_ADMIN_PASSWORD: "CHANGE_ME_TO_YOUR_POSTGRES_PASSWORD"
+      PG_SSL_MODE: "disable"
     volumes:
-      - app_data:/data
+      - /DATA/AppData/10db/data:/data
     healthcheck:
       test: ["CMD", "/app/10db-launch", "healthcheck"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - 10db-network
+    x-casaos:
+      ports:
+        - container: "8080"
+          description:
+            en_us: "Web UI and API (HTTP)"
+      volumes:
+        - container: /data
+          host: /DATA/AppData/10db/data
+          description:
+            en_us: "SQLite control database and app data"
+      envs:
+        - container: APP_MASTER_KEY
+          description:
+            en_us: "REQUIRED. Random secret used for cookies and encryption."
+        - container: APP_BASE_URL
+          description:
+            en_us: "REQUIRED. Public URL used to access 10DB, for example http://192.168.0.47:8080"
+        - container: APP_ALLOWED_ORIGINS
+          description:
+            en_us: "REQUIRED. Allowed browser origin, usually the same value as APP_BASE_URL"
+        - container: PG_ADMIN_HOST
+          description:
+            en_us: "REQUIRED. Hostname or IP address of your existing PostgreSQL server"
+        - container: PG_ADMIN_PORT
+          description:
+            en_us: "PostgreSQL server port, usually 5432"
+        - container: PG_ADMIN_DB
+          description:
+            en_us: "Admin database name used for connecting to PostgreSQL"
+        - container: PG_ADMIN_USER
+          description:
+            en_us: "PostgreSQL admin username"
+        - container: PG_ADMIN_PASSWORD
+          description:
+            en_us: "REQUIRED. PostgreSQL admin password"
+        - container: PG_SSL_MODE
+          description:
+            en_us: "PostgreSQL SSL mode, usually disable or require"
 
-volumes:
-  app_data:
+networks:
+  10db-network:
+    name: 10db-network
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: app
+  port_map: "8080"
+  scheme: http
+  hostname: ""
+  index: /
+  title:
+    en_us: 10DB Launch
+  tagline:
+    en_us: Self-hosted PostgreSQL launchpad
+  category: Utilities
+  developer: iYouKnow
+  author: iYouKnow
+  description:
+    en_us: |
+      10DB Launch is a self-hosted visual PostgreSQL launchpad. It uses your
+      existing PostgreSQL server to create isolated project databases while
+      storing control data locally in SQLite.
+  tips:
+    before_install:
+      en_us: |
+        REQUIRED: replace APP_MASTER_KEY with a strong random string and set
+        PG_ADMIN_HOST / PG_ADMIN_PASSWORD for your existing PostgreSQL server.
+        Also set APP_BASE_URL and APP_ALLOWED_ORIGINS to your CasaOS URL, for
+        example http://192.168.0.47:8080.

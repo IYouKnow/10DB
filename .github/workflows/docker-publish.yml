@@ -2,8 +2,6 @@ name: Publish Docker Image
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -39,9 +37,10 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=ref,event=tag
-            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.description=Self-hosted visual PostgreSQL launchpad
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6

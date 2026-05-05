@@ -14,46 +14,29 @@ Self-hosted visual PostgreSQL launchpad for creating isolated project databases,
 
 The repo now includes:
 - a root `Dockerfile` for building the app image
-- a root `docker-compose.yml` for running only the `10db` app container
+- a root `docker-compose.yml` formatted for CasaOS import
 - a GitHub Actions workflow that publishes the image automatically
 
 `10db` expects an existing PostgreSQL server. It does not need to run PostgreSQL in the same Compose file.
 
-1. Copy `.env.example` to `.env`
-2. Set at least:
-   - `APP_MASTER_KEY`
-   - `PG_ADMIN_HOST`
-   - `PG_ADMIN_PASSWORD`
-   - `APP_BASE_URL`
-   - `APP_ALLOWED_ORIGINS`
-3. Start the stack:
-
-```bash
-docker compose up -d
-```
-
-The app will be available on `http://localhost:8080`.
-
 Notes:
-- The app stores its control SQLite DB in the `app_data` volume at `/data/10db-launch.sqlite`
+- The app stores its control SQLite DB in `/data/10db-launch.sqlite`
 - PostgreSQL is external to this Compose file
-- In CasaOS, import or configure only the `10db` app container and point `PG_ADMIN_HOST` to your existing PostgreSQL server
-- By default, Compose pulls `ghcr.io/iyouknow/10db:v0.1.0`
-- To use another published tag, set `APP_IMAGE`, for example `APP_IMAGE=ghcr.io/iyouknow/10db:latest`
+- The CasaOS compose file uses literal values and `x-casaos` metadata so CasaOS imports it cleanly
+- The default image is `ghcr.io/iyouknow/10db:latest`
+- Before install, replace the placeholder values for `APP_MASTER_KEY`, `APP_BASE_URL`, `APP_ALLOWED_ORIGINS`, `PG_ADMIN_HOST`, and `PG_ADMIN_PASSWORD`
 
 ## GitHub Actions Image Publishing
 
 The workflow at `.github/workflows/docker-publish.yml` publishes the app image to `ghcr.io/iyouknow/10db`.
 
 It runs on:
-- pushes to `main`
 - pushes of tags like `v0.1.0`
 - manual runs from the Actions tab
 
 Published tags include:
-- `latest` for the default branch
+- `latest`
 - the git tag name, like `v0.1.0`
-- a `sha-...` tag for traceability
 
 For CasaOS, use the published image instead of a source build.
 
