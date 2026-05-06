@@ -24,6 +24,7 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS project_databases (
 			id TEXT PRIMARY KEY,
 			project_id TEXT NOT NULL,
+			server_id TEXT NULL,
 			engine TEXT NOT NULL,
 			name TEXT NOT NULL,
 			status TEXT NOT NULL,
@@ -40,11 +41,31 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_project_databases_project_id ON project_databases(project_id)`,
+		`CREATE TABLE IF NOT EXISTS database_servers (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			engine TEXT NOT NULL DEFAULT 'postgres',
+			host TEXT NOT NULL,
+			port INTEGER NOT NULL DEFAULT 5432,
+			admin_username TEXT NOT NULL,
+			admin_password TEXT NOT NULL,
+			ssl_mode TEXT NOT NULL DEFAULT 'disable',
+			default_database TEXT NOT NULL DEFAULT 'postgres',
+			is_default INTEGER NOT NULL DEFAULT 0,
+			is_active INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_servers_default ON database_servers(is_default)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			return err
 		}
+	}
+
+	if err := ensureColumn(ctx, s.db, "project_databases", "server_id", "TEXT NULL"); err != nil {
+		return err
 	}
 
 	if err := ensureColumn(ctx, s.db, "schema_revisions", "database_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -91,12 +112,13 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 
 		if _, err := s.db.ExecContext(ctx, `
 			INSERT INTO project_databases (
-				id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+				id, project_id, server_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
 				pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			uuid.NewString(),
 			projectID,
+			nil,
 			"postgresql",
 			"PostgreSQL Database",
 			status,
@@ -234,7 +256,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 
 func (s *Store) ListProjectDatabases(ctx context.Context, projectID string) ([]types.ProjectDatabase, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+		SELECT id, project_id, server_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
 		       pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
 		FROM project_databases
 		WHERE project_id = ?
@@ -264,7 +286,7 @@ func (s *Store) CountProjectDatabases(ctx context.Context, projectID string) (in
 
 func (s *Store) GetProjectDatabase(ctx context.Context, projectID, databaseID string) (types.ProjectDatabase, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+		SELECT id, project_id, server_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
 		       pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
 		FROM project_databases
 		WHERE id = ? AND project_id = ?
@@ -275,12 +297,13 @@ func (s *Store) GetProjectDatabase(ctx context.Context, projectID, databaseID st
 func (s *Store) CreateProjectDatabase(ctx context.Context, database types.ProjectDatabase) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_databases (
-			id, project_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
+			id, project_id, server_id, engine, name, status, pg_database_name, pg_role_name, pg_password_encrypted,
 			pg_host, pg_port, pg_ssl_mode, position_x, position_y, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		database.ID,
 		database.ProjectID,
+		database.ServerID,
 		database.Engine,
 		database.Name,
 		database.Status,
@@ -301,10 +324,11 @@ func (s *Store) CreateProjectDatabase(ctx context.Context, database types.Projec
 func (s *Store) UpdateProjectDatabase(ctx context.Context, database types.ProjectDatabase) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE project_databases
-		SET engine = ?, name = ?, status = ?, pg_database_name = ?, pg_role_name = ?, pg_password_encrypted = ?,
+		SET server_id = ?, engine = ?, name = ?, status = ?, pg_database_name = ?, pg_role_name = ?, pg_password_encrypted = ?,
 		    pg_host = ?, pg_port = ?, pg_ssl_mode = ?, position_x = ?, position_y = ?, updated_at = ?
 		WHERE id = ? AND project_id = ?
 	`,
+		database.ServerID,
 		database.Engine,
 		database.Name,
 		database.Status,
@@ -326,6 +350,166 @@ func (s *Store) UpdateProjectDatabase(ctx context.Context, database types.Projec
 func (s *Store) DeleteProjectDatabase(ctx context.Context, projectID, databaseID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM project_databases WHERE id = ? AND project_id = ?`, databaseID, projectID)
 	return err
+}
+
+func (s *Store) CountProjects(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&count)
+	return count, err
+}
+
+func (s *Store) CountProjectDatabasesTotal(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases`).Scan(&count)
+	return count, err
+}
+
+func (s *Store) CountFailedProjectDatabases(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases WHERE status = ?`, string(types.ProjectStatusApplyFailed)).Scan(&count)
+	return count, err
+}
+
+func (s *Store) CountDatabaseServers(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM database_servers`).Scan(&count)
+	return count, err
+}
+
+func (s *Store) CountActiveDatabaseServers(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM database_servers WHERE is_active = 1`).Scan(&count)
+	return count, err
+}
+
+func (s *Store) ListDatabaseServers(ctx context.Context) ([]types.DatabaseServer, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, engine, host, port, admin_username, admin_password, ssl_mode, default_database,
+		       is_default, is_active, created_at, updated_at
+		FROM database_servers
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	servers := make([]types.DatabaseServer, 0)
+	for rows.Next() {
+		server, err := scanDatabaseServer(rows)
+		if err != nil {
+			return nil, err
+		}
+		servers = append(servers, server)
+	}
+	return servers, rows.Err()
+}
+
+func (s *Store) GetDatabaseServer(ctx context.Context, id string) (types.DatabaseServer, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, engine, host, port, admin_username, admin_password, ssl_mode, default_database,
+		       is_default, is_active, created_at, updated_at
+		FROM database_servers
+		WHERE id = ?
+	`, id)
+	return scanDatabaseServer(row)
+}
+
+func (s *Store) GetDefaultDatabaseServer(ctx context.Context) (types.DatabaseServer, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, engine, host, port, admin_username, admin_password, ssl_mode, default_database,
+		       is_default, is_active, created_at, updated_at
+		FROM database_servers
+		WHERE is_default = 1
+		LIMIT 1
+	`)
+	return scanDatabaseServer(row)
+}
+
+func (s *Store) GetActiveDefaultDatabaseServer(ctx context.Context) (types.DatabaseServer, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, engine, host, port, admin_username, admin_password, ssl_mode, default_database,
+		       is_default, is_active, created_at, updated_at
+		FROM database_servers
+		WHERE is_default = 1 AND is_active = 1
+		LIMIT 1
+	`)
+	return scanDatabaseServer(row)
+}
+
+func (s *Store) CreateDatabaseServer(ctx context.Context, server types.DatabaseServer) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO database_servers (
+			id, name, engine, host, port, admin_username, admin_password, ssl_mode, default_database,
+			is_default, is_active, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		server.ID,
+		server.Name,
+		server.Engine,
+		server.Host,
+		server.Port,
+		server.AdminUsername,
+		server.AdminPassword,
+		server.SSLMode,
+		server.DefaultDatabase,
+		boolToInt(server.IsDefault),
+		boolToInt(server.IsActive),
+		server.CreatedAt.Format(time.RFC3339Nano),
+		server.UpdatedAt.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *Store) UpdateDatabaseServer(ctx context.Context, server types.DatabaseServer) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE database_servers
+		SET name = ?, engine = ?, host = ?, port = ?, admin_username = ?, admin_password = ?, ssl_mode = ?,
+		    default_database = ?, is_default = ?, is_active = ?, updated_at = ?
+		WHERE id = ?
+	`,
+		server.Name,
+		server.Engine,
+		server.Host,
+		server.Port,
+		server.AdminUsername,
+		server.AdminPassword,
+		server.SSLMode,
+		server.DefaultDatabase,
+		boolToInt(server.IsDefault),
+		boolToInt(server.IsActive),
+		server.UpdatedAt.Format(time.RFC3339Nano),
+		server.ID,
+	)
+	return err
+}
+
+func (s *Store) SetDefaultDatabaseServer(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE database_servers SET is_default = 0, updated_at = ?`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE database_servers SET is_default = 1, updated_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), id); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) DeleteDatabaseServer(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM database_servers WHERE id = ?`, id)
+	return err
+}
+
+func (s *Store) CountDatabasesByServerID(ctx context.Context, serverID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases WHERE server_id = ?`, serverID).Scan(&count)
+	return count, err
 }
 
 func (s *Store) SaveSchemaRevision(ctx context.Context, projectID string, blueprint types.SchemaBlueprint, blueprintHash, generatedSQL string) (types.SchemaRevision, error) {
@@ -437,9 +621,11 @@ func scanProject(scanner interface{ Scan(dest ...any) error }) (types.Project, e
 func scanProjectDatabase(scanner interface{ Scan(dest ...any) error }) (types.ProjectDatabase, error) {
 	var database types.ProjectDatabase
 	var createdAt, updatedAt string
+	var serverID sql.NullString
 	err := scanner.Scan(
 		&database.ID,
 		&database.ProjectID,
+		&serverID,
 		&database.Engine,
 		&database.Name,
 		&database.Status,
@@ -457,9 +643,41 @@ func scanProjectDatabase(scanner interface{ Scan(dest ...any) error }) (types.Pr
 	if err != nil {
 		return types.ProjectDatabase{}, err
 	}
+	if serverID.Valid {
+		database.ServerID = &serverID.String
+	}
 	database.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	database.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
 	return database, nil
+}
+
+func scanDatabaseServer(scanner interface{ Scan(dest ...any) error }) (types.DatabaseServer, error) {
+	var server types.DatabaseServer
+	var createdAt, updatedAt string
+	var isDefault, isActive int
+	err := scanner.Scan(
+		&server.ID,
+		&server.Name,
+		&server.Engine,
+		&server.Host,
+		&server.Port,
+		&server.AdminUsername,
+		&server.AdminPassword,
+		&server.SSLMode,
+		&server.DefaultDatabase,
+		&isDefault,
+		&isActive,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return types.DatabaseServer{}, err
+	}
+	server.IsDefault = isDefault == 1
+	server.IsActive = isActive == 1
+	server.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	server.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return server, nil
 }
 
 func scanRevision(scanner interface{ Scan(dest ...any) error }) (types.SchemaRevision, error) {
@@ -512,4 +730,11 @@ func timePointerString(value *time.Time) any {
 		return nil
 	}
 	return value.Format(time.RFC3339Nano)
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

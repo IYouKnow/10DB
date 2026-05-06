@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -20,8 +21,8 @@ type userReader interface {
 }
 
 type postgresProvider interface {
-	CreateProjectDatabase(ctx context.Context, databaseName, roleName, password string) error
-	DropProjectDatabase(ctx context.Context, databaseName, roleName string) error
+	CreateProjectDatabaseWithConfig(ctx context.Context, cfg postgres.AdminConfig, databaseName, roleName, password string) error
+	DropProjectDatabaseWithConfig(ctx context.Context, cfg postgres.AdminConfig, databaseName, roleName string) error
 	ResetProjectSchema(ctx context.Context, project types.Project, password string) error
 	ApplySQL(ctx context.Context, project types.Project, password, sql string) error
 	DropTable(ctx context.Context, project types.Project, password, tableName string) error
@@ -35,11 +36,10 @@ type Service struct {
 	users    userReader
 	postgres postgresProvider
 	crypto   *crypto.Service
-	pgConfig postgres.AdminConfig
 }
 
-func New(store *Store, users userReader, postgresService postgresProvider, cryptoService *crypto.Service, pgConfig postgres.AdminConfig) *Service {
-	return &Service{store: store, users: users, postgres: postgresService, crypto: cryptoService, pgConfig: pgConfig}
+func New(store *Store, users userReader, postgresService postgresProvider, cryptoService *crypto.Service) *Service {
+	return &Service{store: store, users: users, postgres: postgresService, crypto: cryptoService}
 }
 
 type CreateProjectInput struct {
@@ -49,7 +49,8 @@ type CreateProjectInput struct {
 }
 
 type ProvisionPostgresInput struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	ServerID string `json:"server_id"`
 }
 
 type UpdateProjectDatabaseInput struct {
@@ -150,6 +151,10 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	if err != nil {
 		return types.Project{}, err
 	}
+	server, adminConfig, err := s.resolveProvisionServer(ctx, ownerUserID, input.ServerID)
+	if err != nil {
+		return types.Project{}, err
+	}
 
 	index := len(project.Databases)
 	column := index % databasesPerRow
@@ -162,15 +167,16 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 	database := types.ProjectDatabase{
 		ID:                  uuid.NewString(),
 		ProjectID:           project.ID,
+		ServerID:            &server.ID,
 		Engine:              "postgresql",
 		Name:                displayName,
 		Status:              string(types.ProjectStatusCreating),
 		PGDatabaseName:      dbName,
 		PGRoleName:          roleName,
 		PGPasswordEncrypted: encryptedPassword,
-		PGHost:              s.pgConfig.Host,
-		PGPort:              s.pgConfig.Port,
-		PGSSLMode:           s.pgConfig.SSLMode,
+		PGHost:              server.Host,
+		PGPort:              server.Port,
+		PGSSLMode:           server.SSLMode,
 		PositionX:           defaultDatabasePositionX + float64(column)*databaseColumnGap,
 		PositionY:           defaultDatabasePositionY + float64(row)*databaseRowGap,
 		CreatedAt:           now,
@@ -186,7 +192,7 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 		return types.Project{}, err
 	}
 
-	if err := s.postgres.CreateProjectDatabase(ctx, dbName, roleName, password); err != nil {
+	if err := s.postgres.CreateProjectDatabaseWithConfig(ctx, adminConfig, dbName, roleName, password); err != nil {
 		_ = s.store.DeleteProjectDatabase(ctx, project.ID, database.ID)
 		project.Status = types.ProjectStatusDraft
 		project.UpdatedAt = time.Now().UTC()
@@ -249,8 +255,12 @@ func (s *Service) RemoveProvisionedPostgres(ctx context.Context, ownerUserID, pr
 	if err != nil {
 		return types.Project{}, err
 	}
+	adminConfig, err := s.adminConfigForDatabase(ctx, database)
+	if err != nil {
+		return types.Project{}, err
+	}
 
-	if err := s.postgres.DropProjectDatabase(ctx, database.PGDatabaseName, database.PGRoleName); err != nil {
+	if err := s.postgres.DropProjectDatabaseWithConfig(ctx, adminConfig, database.PGDatabaseName, database.PGRoleName); err != nil {
 		return types.Project{}, err
 	}
 	if err := s.store.DeleteProjectDatabase(ctx, project.ID, database.ID); err != nil {
@@ -520,8 +530,12 @@ func (s *Service) Delete(ctx context.Context, ownerUserID, projectID string) err
 	if err != nil {
 		return err
 	}
-	if project.PGDatabaseName != "" && project.PGRoleName != "" {
-		if err := s.postgres.DropProjectDatabase(ctx, project.PGDatabaseName, project.PGRoleName); err != nil {
+	for _, database := range project.Databases {
+		adminConfig, err := s.adminConfigForDatabase(ctx, database)
+		if err != nil {
+			return err
+		}
+		if err := s.postgres.DropProjectDatabaseWithConfig(ctx, adminConfig, database.PGDatabaseName, database.PGRoleName); err != nil {
 			return err
 		}
 	}
@@ -571,4 +585,53 @@ func (s *Service) ListRows(ctx context.Context, ownerUserID, projectID, tableNam
 		return types.TableRows{}, err
 	}
 	return s.postgres.ListRows(ctx, project, password, tableName, limit, offset)
+}
+
+func (s *Service) resolveProvisionServer(ctx context.Context, ownerUserID, requestedServerID string) (types.DatabaseServer, postgres.AdminConfig, error) {
+	isAdmin, err := s.isAdmin(ctx, ownerUserID)
+	if err != nil {
+		return types.DatabaseServer{}, postgres.AdminConfig{}, err
+	}
+
+	if isAdmin && strings.TrimSpace(requestedServerID) != "" {
+		server, err := s.store.GetDatabaseServer(ctx, strings.TrimSpace(requestedServerID))
+		if err != nil {
+			return types.DatabaseServer{}, postgres.AdminConfig{}, err
+		}
+		if !server.IsActive {
+			return types.DatabaseServer{}, postgres.AdminConfig{}, errors.New("Selected PostgreSQL server is inactive.")
+		}
+		return server, databaseServerAdminConfig(server), nil
+	}
+
+	server, err := s.store.GetActiveDefaultDatabaseServer(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.DatabaseServer{}, postgres.AdminConfig{}, errors.New("No default PostgreSQL server is configured.")
+		}
+		return types.DatabaseServer{}, postgres.AdminConfig{}, err
+	}
+	return server, databaseServerAdminConfig(server), nil
+}
+
+func (s *Service) adminConfigForDatabase(ctx context.Context, database types.ProjectDatabase) (postgres.AdminConfig, error) {
+	if database.ServerID == nil || strings.TrimSpace(*database.ServerID) == "" {
+		return postgres.AdminConfig{}, errors.New("This database is not linked to a managed PostgreSQL server.")
+	}
+	server, err := s.store.GetDatabaseServer(ctx, *database.ServerID)
+	if err != nil {
+		return postgres.AdminConfig{}, err
+	}
+	return databaseServerAdminConfig(server), nil
+}
+
+func databaseServerAdminConfig(server types.DatabaseServer) postgres.AdminConfig {
+	return postgres.AdminConfig{
+		Host:     server.Host,
+		Port:     server.Port,
+		DBName:   server.DefaultDatabase,
+		User:     server.AdminUsername,
+		Password: server.AdminPassword,
+		SSLMode:  server.SSLMode,
+	}
 }

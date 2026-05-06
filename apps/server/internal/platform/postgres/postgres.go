@@ -46,35 +46,19 @@ func (s *Service) Ping(ctx context.Context) error {
 }
 
 func (s *Service) CreateProjectDatabase(ctx context.Context, databaseName, roleName, password string) error {
-	if _, err := s.pool.Exec(ctx, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD %s", quoteIdent(roleName), quoteLiteral(password))); err != nil {
-		return err
-	}
-	if _, err := s.pool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s OWNER %s", quoteIdent(databaseName), quoteIdent(roleName))); err != nil {
-		_, _ = s.pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName)))
-		return err
-	}
-	projectConn, err := pgx.Connect(ctx, buildDSN(s.cfg.Host, s.cfg.Port, databaseName, s.cfg.User, s.cfg.Password, s.cfg.SSLMode))
-	if err != nil {
-		return err
-	}
-	defer projectConn.Close(ctx)
-	_, err = projectConn.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`)
-	return err
+	return CreateProjectDatabaseWithConfig(ctx, s.cfg, databaseName, roleName, password)
+}
+
+func (s *Service) CreateProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, databaseName, roleName, password string) error {
+	return CreateProjectDatabaseWithConfig(ctx, cfg, databaseName, roleName, password)
 }
 
 func (s *Service) DropProjectDatabase(ctx context.Context, databaseName, roleName string) error {
-	_, _ = s.pool.Exec(ctx, `
-		SELECT pg_terminate_backend(pid)
-		FROM pg_stat_activity
-		WHERE datname = $1 AND pid <> pg_backend_pid()
-	`, databaseName)
-	if _, err := s.pool.Exec(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS %s", quoteIdent(databaseName))); err != nil {
-		return err
-	}
-	if _, err := s.pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName))); err != nil {
-		return err
-	}
-	return nil
+	return DropProjectDatabaseWithConfig(ctx, s.cfg, databaseName, roleName)
+}
+
+func (s *Service) DropProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, databaseName, roleName string) error {
+	return DropProjectDatabaseWithConfig(ctx, cfg, databaseName, roleName)
 }
 
 func (s *Service) ResetProjectSchema(ctx context.Context, project types.Project, password string) error {
@@ -235,6 +219,59 @@ func BuildConnection(project types.Project, password string) types.ProjectConnec
 			password,
 		),
 	}
+}
+
+func CreateProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, databaseName, roleName, password string) error {
+	pool, err := pgxpool.New(ctx, buildDSN(cfg.Host, cfg.Port, cfg.DBName, cfg.User, cfg.Password, cfg.SSLMode))
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD %s", quoteIdent(roleName), quoteLiteral(password))); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s OWNER %s", quoteIdent(databaseName), quoteIdent(roleName))); err != nil {
+		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName)))
+		return err
+	}
+	projectConn, err := pgx.Connect(ctx, buildDSN(cfg.Host, cfg.Port, databaseName, cfg.User, cfg.Password, cfg.SSLMode))
+	if err != nil {
+		return err
+	}
+	defer projectConn.Close(ctx)
+	_, err = projectConn.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`)
+	return err
+}
+
+func DropProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, databaseName, roleName string) error {
+	pool, err := pgxpool.New(ctx, buildDSN(cfg.Host, cfg.Port, cfg.DBName, cfg.User, cfg.Password, cfg.SSLMode))
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	_, _ = pool.Exec(ctx, `
+		SELECT pg_terminate_backend(pid)
+		FROM pg_stat_activity
+		WHERE datname = $1 AND pid <> pg_backend_pid()
+	`, databaseName)
+	if _, err := pool.Exec(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS %s", quoteIdent(databaseName))); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName))); err != nil {
+		return err
+	}
+	return nil
+}
+
+func TestAdminConnection(ctx context.Context, cfg AdminConfig) error {
+	conn, err := pgx.Connect(ctx, buildDSN(cfg.Host, cfg.Port, cfg.DBName, cfg.User, cfg.Password, cfg.SSLMode))
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+	return conn.Ping(ctx)
 }
 
 func buildDSN(host string, port int, dbName, user, password, sslMode string) string {

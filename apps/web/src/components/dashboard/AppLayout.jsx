@@ -86,8 +86,17 @@ export default function AppLayout() {
           })}
         </nav>
 
-        {/* Instance status */}
-        <div className="px-4 py-4 border-t border-border shrink-0">
+      {/* Instance status */}
+      <div className="px-4 py-4 border-t border-border shrink-0">
+          {user?.role === 'admin' ? (
+            <Link
+              to="/admin"
+              className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-secondary/20 px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
+            >
+              <Settings className="h-4 w-4 text-primary" />
+              Admin Dashboard
+            </Link>
+          ) : null}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Circle className="w-2 h-2 fill-chart-3 text-chart-3" />
             <span className="font-mono">localhost:8080</span>

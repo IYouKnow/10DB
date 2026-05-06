@@ -24,7 +24,8 @@ Notes:
 - PostgreSQL is external to this Compose file
 - The CasaOS compose file uses literal values and `x-casaos` metadata so CasaOS imports it cleanly
 - The default image is `ghcr.io/iyouknow/10db:latest`
-- Before install, replace the placeholder values for `APP_MASTER_KEY`, `APP_BASE_URL`, `APP_ALLOWED_ORIGINS`, `PG_ADMIN_HOST`, and `PG_ADMIN_PASSWORD`
+- Before install, replace the placeholder values for `APP_MASTER_KEY`, `APP_BASE_URL`, and `APP_ALLOWED_ORIGINS`
+- PostgreSQL servers are configured in the Admin Dashboard after startup
 
 ## GitHub Actions Image Publishing
 

@@ -92,6 +92,12 @@ func (s *Store) GetByID(ctx context.Context, id string) (types.User, error) {
 	return scanUser(row)
 }
 
+func (s *Store) Count(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
+}
+
 func (s *Store) columnExists(ctx context.Context, tableName, columnName string) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(`+tableName+`)`)
 	if err != nil {

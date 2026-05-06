@@ -79,3 +79,7 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (typ
 func (s *Service) GetByID(ctx context.Context, id string) (types.User, error) {
 	return s.store.GetByID(ctx, id)
 }
+
+func (s *Service) Count(ctx context.Context) (int, error) {
+	return s.store.Count(ctx)
+}

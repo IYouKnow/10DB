@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Database, Plus, Search } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ProjectCard from '../components/dashboard/ProjectCard';
@@ -69,6 +69,15 @@ export default function Dashboard() {
           <div className="hidden text-xs text-muted-foreground sm:block">
             {user?.email}
           </div>
+
+          {user?.role === 'admin' ? (
+            <Link
+              to="/admin"
+              className="hidden rounded-lg border border-border bg-secondary/20 px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-secondary/60 sm:inline-flex"
+            >
+              Admin
+            </Link>
+          ) : null}
 
           <Button
             type="button"

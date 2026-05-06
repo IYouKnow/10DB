@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/pedro/10db-launch/apps/server/internal/admin"
 	"github.com/pedro/10db-launch/apps/server/internal/platform/auth"
 	"github.com/pedro/10db-launch/apps/server/internal/project"
 	types "github.com/pedro/10db-launch/apps/server/internal/types"
@@ -23,13 +24,14 @@ import (
 
 type Handler struct {
 	auth     *auth.Service
+	admin    *admin.Service
 	users    *user.Service
 	projects *project.Service
 	origins  []string
 }
 
-func New(authService *auth.Service, userService *user.Service, projectService *project.Service, allowedOrigins []string) *Handler {
-	return &Handler{auth: authService, users: userService, projects: projectService, origins: allowedOrigins}
+func New(authService *auth.Service, adminService *admin.Service, userService *user.Service, projectService *project.Service, allowedOrigins []string) *Handler {
+	return &Handler{auth: authService, admin: adminService, users: userService, projects: projectService, origins: allowedOrigins}
 }
 
 func (h *Handler) Router(staticDir string) http.Handler {
@@ -83,6 +85,18 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Get("/projects/{projectID}/tables/{tableName}/columns", h.listColumns)
 			secure.Get("/projects/{projectID}/tables/{tableName}/rows", h.listRows)
 		})
+	})
+
+	r.Route("/api/admin", func(adminRouter chi.Router) {
+		adminRouter.Use(h.requireAuth)
+		adminRouter.Use(h.requireAdmin)
+		adminRouter.Get("/overview", h.adminOverview)
+		adminRouter.Get("/servers", h.adminListServers)
+		adminRouter.Post("/servers", h.adminCreateServer)
+		adminRouter.Patch("/servers/{serverID}", h.adminUpdateServer)
+		adminRouter.Post("/servers/{serverID}/test", h.adminTestServer)
+		adminRouter.Post("/servers/{serverID}/set-default", h.adminSetDefaultServer)
+		adminRouter.Delete("/servers/{serverID}", h.adminDeleteServer)
 	})
 
 	if _, err := os.Stat(path.Join(staticDir, "index.html")); err == nil {
@@ -144,6 +158,26 @@ func spaHandler(staticDir string) http.Handler {
 
 func (h *Handler) requireAuth(next http.Handler) http.Handler {
 	return auth.Require(h.auth, auth.EnforceSameOrigin(h.origins, next))
+}
+
+func (h *Handler) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := auth.SessionFromContext(r.Context())
+		if !ok {
+			Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+			return
+		}
+		userRecord, err := h.users.GetByID(r.Context(), session.UserID)
+		if err != nil {
+			Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+			return
+		}
+		if userRecord.Role != types.UserRoleAdmin {
+			Error(w, http.StatusForbidden, "forbidden", "Admin access required.", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -33,7 +34,15 @@ func (s *stubPostgres) CreateProjectDatabase(context.Context, string, string, st
 	return nil
 }
 
+func (s *stubPostgres) CreateProjectDatabaseWithConfig(context.Context, postgres.AdminConfig, string, string, string) error {
+	return nil
+}
+
 func (s *stubPostgres) DropProjectDatabase(context.Context, string, string) error {
+	return nil
+}
+
+func (s *stubPostgres) DropProjectDatabaseWithConfig(context.Context, postgres.AdminConfig, string, string) error {
 	return nil
 }
 
@@ -137,6 +146,45 @@ func TestAdminCanExceedBothLimits(t *testing.T) {
 	}
 }
 
+func TestLegacyDatabaseWithoutServerLinkReturnsManagedServerErrorOnDelete(t *testing.T) {
+	service := newTestService(t, map[string]types.User{
+		"user-1": {ID: "user-1", Role: types.UserRoleUser},
+	})
+
+	ctx := context.Background()
+	project, err := service.Create(ctx, "user-1", CreateProjectInput{Name: "Project One", Slug: "project-one"})
+	if err != nil {
+		t.Fatalf("Create() project error = %v", err)
+	}
+
+	database := types.ProjectDatabase{
+		ID:                  "db-legacy",
+		ProjectID:           project.ID,
+		ServerID:            nil,
+		Engine:              "postgresql",
+		Name:                "Legacy DB",
+		Status:              string(types.ProjectStatusReady),
+		PGDatabaseName:      "legacy_db",
+		PGRoleName:          "legacy_role",
+		PGPasswordEncrypted: "encrypted",
+		PGHost:              "localhost",
+		PGPort:              5432,
+		PGSSLMode:           "disable",
+		PositionX:           80,
+		PositionY:           80,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+	}
+	if err := service.store.CreateProjectDatabase(ctx, database); err != nil {
+		t.Fatalf("CreateProjectDatabase() error = %v", err)
+	}
+
+	_, err = service.RemoveProvisionedPostgres(ctx, "user-1", project.ID, database.ID)
+	if err == nil || err.Error() != "This database is not linked to a managed PostgreSQL server." {
+		t.Fatalf("RemoveProvisionedPostgres() error = %v, want managed server link error", err)
+	}
+}
+
 func newTestService(t *testing.T, users map[string]types.User) *Service {
 	t.Helper()
 
@@ -144,6 +192,24 @@ func newTestService(t *testing.T, users map[string]types.User) *Service {
 	store := NewStore(dbConn)
 	if err := store.EnsureSchema(context.Background()); err != nil {
 		t.Fatalf("EnsureSchema() error = %v", err)
+	}
+	now := time.Now().UTC()
+	if err := store.CreateDatabaseServer(context.Background(), types.DatabaseServer{
+		ID:              "server-1",
+		Name:            "Primary",
+		Engine:          "postgres",
+		Host:            "localhost",
+		Port:            5432,
+		AdminUsername:   "postgres",
+		AdminPassword:   "secret",
+		SSLMode:         "disable",
+		DefaultDatabase: "postgres",
+		IsDefault:       true,
+		IsActive:        true,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}); err != nil {
+		t.Fatalf("CreateDatabaseServer() error = %v", err)
 	}
 	userStore := user.NewStore(dbConn)
 	if err := userStore.EnsureSchema(context.Background()); err != nil {
@@ -155,7 +221,6 @@ func newTestService(t *testing.T, users map[string]types.User) *Service {
 		&stubUsers{users: users},
 		&stubPostgres{},
 		crypto.New("test-master-key"),
-		postgres.AdminConfig{Host: "localhost", Port: 5432, SSLMode: "disable"},
 	)
 }
 

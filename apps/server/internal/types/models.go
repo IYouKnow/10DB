@@ -34,6 +34,7 @@ type Project struct {
 type ProjectDatabase struct {
 	ID                  string    `json:"id"`
 	ProjectID           string    `json:"projectId"`
+	ServerID            *string   `json:"serverId,omitempty"`
 	Engine              string    `json:"engine"`
 	Name                string    `json:"name"`
 	Status              string    `json:"status"`
@@ -63,6 +64,47 @@ const (
 	UserRoleAdmin = "admin"
 	UserRoleUser  = "user"
 )
+
+type DatabaseServer struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Engine          string    `json:"engine"`
+	Host            string    `json:"host"`
+	Port            int       `json:"port"`
+	AdminUsername   string    `json:"adminUsername"`
+	AdminPassword   string    `json:"-"` // TODO: encrypt stored server credentials before production use.
+	SSLMode         string    `json:"sslMode"`
+	DefaultDatabase string    `json:"defaultDatabase"`
+	IsDefault       bool      `json:"isDefault"`
+	IsActive        bool      `json:"isActive"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+type DatabaseServerView struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Engine          string    `json:"engine"`
+	Host            string    `json:"host"`
+	Port            int       `json:"port"`
+	AdminUsername   string    `json:"adminUsername"`
+	HasPassword     bool      `json:"hasPassword"`
+	SSLMode         string    `json:"sslMode"`
+	DefaultDatabase string    `json:"defaultDatabase"`
+	IsDefault       bool      `json:"isDefault"`
+	IsActive        bool      `json:"isActive"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+type AdminOverview struct {
+	TotalUsers            int `json:"total_users"`
+	TotalProjects         int `json:"total_projects"`
+	TotalDatabases        int `json:"total_databases"`
+	TotalDatabaseServers  int `json:"total_database_servers"`
+	FailedDatabases       int `json:"failed_databases"`
+	ActiveDatabaseServers int `json:"active_database_servers"`
+}
 
 type ProjectConnection struct {
 	Host       string `json:"host"`

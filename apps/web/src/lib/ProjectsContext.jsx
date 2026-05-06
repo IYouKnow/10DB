@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthContext';
+import { request } from './api';
 
 const ProjectsContext = createContext(null);
 
@@ -9,42 +10,6 @@ function slugify(value) {
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-
-async function request(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-    ...options,
-  });
-
-  if (!response.ok) {
-    let message = 'Request failed';
-    try {
-      const body = await response.json();
-      message = body?.message || body?.error || body?.error?.message || message;
-      if (body?.details && typeof body.details === 'object') {
-        const firstDetail = Object.values(body.details).find((value) => typeof value === 'string');
-        if (firstDetail) {
-          message = String(firstDetail);
-        }
-      }
-    } catch {
-      // Ignore JSON parsing errors and keep the fallback message.
-    }
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
-  }
-
-  if (response.status === 204) {
-    return null;
-  }
-
-  return response.json();
 }
 
 export function ProjectsProvider({ children }) {

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,39 +11,22 @@ import (
 )
 
 type Config struct {
-	AppAddr         string
-	AppBaseURL      string
-	AllowedOrigins  []string
-	MasterKey       string
-	SessionTTL      time.Duration
-	ControlDBPath   string
-	PGAdminHost     string
-	PGAdminPort     int
-	PGAdminDB       string
-	PGAdminUser     string
-	PGAdminPassword string
-	PGSSLMode       string
+	AppAddr        string
+	AppBaseURL     string
+	AllowedOrigins []string
+	MasterKey      string
+	SessionTTL     time.Duration
+	ControlDBPath  string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		AppAddr:         getEnv("APP_ADDR", ":8080"),
-		AppBaseURL:      getEnv("APP_BASE_URL", "http://localhost:8080"),
-		AllowedOrigins:  parseOrigins(getEnv("APP_ALLOWED_ORIGINS", "http://localhost:8080,http://localhost:5173,http://127.0.0.1:5173")),
-		MasterKey:       os.Getenv("APP_MASTER_KEY"),
-		ControlDBPath:   resolveControlDBPath(getEnv("CONTROL_DB_PATH", "apps/server/data/10db-launch.sqlite")),
-		PGAdminHost:     getEnv("PG_ADMIN_HOST", "localhost"),
-		PGAdminDB:       getEnv("PG_ADMIN_DB", "postgres"),
-		PGAdminUser:     getEnv("PG_ADMIN_USER", "postgres"),
-		PGAdminPassword: os.Getenv("PG_ADMIN_PASSWORD"),
-		PGSSLMode:       getEnv("PG_SSL_MODE", "disable"),
+		AppAddr:        getEnv("APP_ADDR", ":8080"),
+		AppBaseURL:     getEnv("APP_BASE_URL", "http://localhost:8080"),
+		AllowedOrigins: parseOrigins(getEnv("APP_ALLOWED_ORIGINS", "http://localhost:8080,http://localhost:5173,http://127.0.0.1:5173")),
+		MasterKey:      os.Getenv("APP_MASTER_KEY"),
+		ControlDBPath:  resolveControlDBPath(getEnv("CONTROL_DB_PATH", "apps/server/data/10db-launch.sqlite")),
 	}
-
-	port, err := strconv.Atoi(getEnv("PG_ADMIN_PORT", "5432"))
-	if err != nil {
-		return Config{}, fmt.Errorf("parse PG_ADMIN_PORT: %w", err)
-	}
-	cfg.PGAdminPort = port
 
 	ttlHours, err := strconv.Atoi(getEnv("APP_SESSION_TTL_HOURS", "24"))
 	if err != nil {
@@ -61,8 +43,7 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	var missing []string
 	for key, value := range map[string]string{
-		"APP_MASTER_KEY":    c.MasterKey,
-		"PG_ADMIN_PASSWORD": c.PGAdminPassword,
+		"APP_MASTER_KEY": c.MasterKey,
 	} {
 		if strings.TrimSpace(value) == "" {
 			missing = append(missing, key)
@@ -79,21 +60,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid APP_ALLOWED_ORIGINS entry %q: %w", origin, err)
 		}
 	}
-	if c.PGAdminPort <= 0 {
-		return errors.New("PG_ADMIN_PORT must be positive")
-	}
 	return nil
-}
-
-func (c Config) AdminDSN() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		url.QueryEscape(c.PGAdminUser),
-		url.QueryEscape(c.PGAdminPassword),
-		c.PGAdminHost,
-		c.PGAdminPort,
-		url.PathEscape(c.PGAdminDB),
-		url.QueryEscape(c.PGSSLMode),
-	)
 }
 
 func getEnv(key, fallback string) string {
