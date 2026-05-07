@@ -50,6 +50,17 @@ type ProjectDatabase struct {
 	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
+type DatabaseCredential struct {
+	ID         string     `json:"id"`
+	DatabaseID string     `json:"databaseId"`
+	Label      string     `json:"label"`
+	Username   string     `json:"username"`
+	Password   string     `json:"-"`
+	Type       string     `json:"type"`
+	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+}
+
 type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
@@ -115,6 +126,16 @@ type ProjectConnection struct {
 	SSLMode    string `json:"sslMode"`
 	DSN        string `json:"dsn"`
 	EnvExample string `json:"envExample"`
+}
+
+type DatabaseCredentialsView struct {
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	Database    string `json:"database"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	SSLMode     string `json:"sslMode"`
+	DatabaseURL string `json:"databaseUrl"`
 }
 
 type SchemaRevision struct {

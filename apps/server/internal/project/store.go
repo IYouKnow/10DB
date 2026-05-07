@@ -20,6 +20,26 @@ func NewStore(db *sql.DB) *Store {
 }
 
 func (s *Store) EnsureSchema(ctx context.Context) error {
+	type legacyProjectDatabase struct {
+		projectID string
+		status    string
+		dbName    string
+		roleName  string
+		password  string
+		host      string
+		port      int
+		sslMode   string
+		createdAt string
+		updatedAt string
+	}
+
+	type credentialBackfill struct {
+		databaseID string
+		username   string
+		password   string
+		createdAt  string
+	}
+
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS project_databases (
 			id TEXT PRIMARY KEY,
@@ -41,6 +61,21 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_project_databases_project_id ON project_databases(project_id)`,
+		`CREATE TABLE IF NOT EXISTS database_credentials (
+			id TEXT PRIMARY KEY,
+			database_id TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT 'Main credentials',
+			username TEXT NOT NULL,
+			password TEXT NOT NULL,
+			type TEXT NOT NULL DEFAULT 'main',
+			revoked_at TEXT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(database_id) REFERENCES project_databases(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_credentials_database_id ON database_credentials(database_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_credentials_one_active_main
+			ON database_credentials(database_id)
+			WHERE type = 'main' AND revoked_at IS NULL`,
 		`CREATE TABLE IF NOT EXISTS database_servers (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -75,6 +110,7 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		return err
 	}
 
+	legacyDatabases := make([]legacyProjectDatabase, 0)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, status, pg_database_name, pg_role_name, pg_password_encrypted, pg_host, pg_port, pg_ssl_mode, created_at, updated_at
 		FROM projects
@@ -101,9 +137,30 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		if err := rows.Scan(&projectID, &status, &dbName, &roleName, &password, &host, &port, &sslMode, &createdAt, &updatedAt); err != nil {
 			return err
 		}
+		legacyDatabases = append(legacyDatabases, legacyProjectDatabase{
+			projectID: projectID,
+			status:    status,
+			dbName:    dbName,
+			roleName:  roleName,
+			password:  password,
+			host:      host,
+			port:      port,
+			sslMode:   sslMode,
+			createdAt: createdAt,
+			updatedAt: updatedAt,
+		})
+	}
 
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, item := range legacyDatabases {
 		var count int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases WHERE project_id = ? AND pg_database_name = ?`, projectID, dbName).Scan(&count); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_databases WHERE project_id = ? AND pg_database_name = ?`, item.projectID, item.dbName).Scan(&count); err != nil {
 			return err
 		}
 		if count > 0 {
@@ -117,27 +174,92 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			uuid.NewString(),
-			projectID,
+			item.projectID,
 			nil,
 			"postgresql",
 			"PostgreSQL Database",
-			status,
-			dbName,
-			roleName,
-			password,
-			host,
-			port,
-			sslMode,
+			item.status,
+			item.dbName,
+			item.roleName,
+			item.password,
+			item.host,
+			item.port,
+			item.sslMode,
 			80.0,
 			80.0,
-			createdAt,
-			updatedAt,
+			item.createdAt,
+			item.updatedAt,
 		); err != nil {
 			return err
 		}
 	}
 
-	return rows.Err()
+	credentialBackfills := make([]credentialBackfill, 0)
+	credentialRows, err := s.db.QueryContext(ctx, `
+		SELECT id, pg_role_name, pg_password_encrypted, created_at
+		FROM project_databases
+	`)
+	if err != nil {
+		return err
+	}
+	defer credentialRows.Close()
+
+	for credentialRows.Next() {
+		var (
+			databaseID string
+			username   string
+			password   string
+			createdAt  string
+		)
+		if err := credentialRows.Scan(&databaseID, &username, &password, &createdAt); err != nil {
+			return err
+		}
+		credentialBackfills = append(credentialBackfills, credentialBackfill{
+			databaseID: databaseID,
+			username:   username,
+			password:   password,
+			createdAt:  createdAt,
+		})
+	}
+
+	if err := credentialRows.Err(); err != nil {
+		return err
+	}
+	if err := credentialRows.Close(); err != nil {
+		return err
+	}
+
+	for _, item := range credentialBackfills {
+		var count int
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM database_credentials
+			WHERE database_id = ? AND type = 'main' AND revoked_at IS NULL
+		`, item.databaseID).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO database_credentials (id, database_id, label, username, password, type, revoked_at, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			uuid.NewString(),
+			item.databaseID,
+			"Main credentials",
+			item.username,
+			item.password,
+			"main",
+			nil,
+			item.createdAt,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Store) ListProjects(ctx context.Context, ownerUserID string) ([]types.Project, error) {
@@ -294,6 +416,17 @@ func (s *Store) GetProjectDatabase(ctx context.Context, projectID, databaseID st
 	return scanProjectDatabase(row)
 }
 
+func (s *Store) GetProjectDatabaseByOwner(ctx context.Context, ownerUserID, databaseID string) (types.ProjectDatabase, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT d.id, d.project_id, d.server_id, d.engine, d.name, d.status, d.pg_database_name, d.pg_role_name, d.pg_password_encrypted,
+		       d.pg_host, d.pg_port, d.pg_ssl_mode, d.position_x, d.position_y, d.created_at, d.updated_at
+		FROM project_databases d
+		INNER JOIN projects p ON p.id = d.project_id
+		WHERE d.id = ? AND p.owner_user_id = ?
+	`, databaseID, ownerUserID)
+	return scanProjectDatabase(row)
+}
+
 func (s *Store) CreateProjectDatabase(ctx context.Context, database types.ProjectDatabase) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_databases (
@@ -350,6 +483,33 @@ func (s *Store) UpdateProjectDatabase(ctx context.Context, database types.Projec
 func (s *Store) DeleteProjectDatabase(ctx context.Context, projectID, databaseID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM project_databases WHERE id = ? AND project_id = ?`, databaseID, projectID)
 	return err
+}
+
+func (s *Store) CreateDatabaseCredential(ctx context.Context, credential types.DatabaseCredential) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO database_credentials (id, database_id, label, username, password, type, revoked_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		credential.ID,
+		credential.DatabaseID,
+		credential.Label,
+		credential.Username,
+		credential.Password,
+		credential.Type,
+		timePointerString(credential.RevokedAt),
+		credential.CreatedAt.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *Store) GetActiveMainDatabaseCredential(ctx context.Context, databaseID string) (types.DatabaseCredential, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, database_id, label, username, password, type, revoked_at, created_at
+		FROM database_credentials
+		WHERE database_id = ? AND type = 'main' AND revoked_at IS NULL
+		LIMIT 1
+	`, databaseID)
+	return scanDatabaseCredential(row)
 }
 
 func (s *Store) CountProjects(ctx context.Context) (int, error) {
@@ -678,6 +838,32 @@ func scanDatabaseServer(scanner interface{ Scan(dest ...any) error }) (types.Dat
 	server.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	server.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
 	return server, nil
+}
+
+func scanDatabaseCredential(scanner interface{ Scan(dest ...any) error }) (types.DatabaseCredential, error) {
+	var credential types.DatabaseCredential
+	var revokedAt sql.NullString
+	var createdAt string
+	if err := scanner.Scan(
+		&credential.ID,
+		&credential.DatabaseID,
+		&credential.Label,
+		&credential.Username,
+		&credential.Password,
+		&credential.Type,
+		&revokedAt,
+		&createdAt,
+	); err != nil {
+		return types.DatabaseCredential{}, err
+	}
+	if revokedAt.Valid {
+		parsed, err := time.Parse(time.RFC3339Nano, revokedAt.String)
+		if err == nil {
+			credential.RevokedAt = &parsed
+		}
+	}
+	credential.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	return credential, nil
 }
 
 func scanRevision(scanner interface{ Scan(dest ...any) error }) (types.SchemaRevision, error) {

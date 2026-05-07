@@ -6,11 +6,11 @@ services:
     image: ghcr.io/iyouknow/10db:latest
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "56080:8080"
     environment:
       APP_ADDR: ":8080"
-      APP_BASE_URL: "http://YOUR-HOST-IP:8080"
-      APP_ALLOWED_ORIGINS: "http://YOUR-HOST-IP:8080"
+      APP_BASE_URL: "http://YOUR-HOST-IP:56080"
+      APP_ALLOWED_ORIGINS: "http://YOUR-HOST-IP:56080"
       APP_MASTER_KEY: "CHANGE_ME_TO_A_RANDOM_SECRET"
       APP_SESSION_TTL_HOURS: "24"
       CONTROL_DB_PATH: "/data/10db-launch.sqlite"
@@ -46,7 +46,7 @@ services:
             en_us: "REQUIRED. Random secret used for cookies and encryption."
         - container: APP_BASE_URL
           description:
-            en_us: "REQUIRED. Public URL used to access 10DB, for example http://192.168.0.47:8080"
+            en_us: "REQUIRED. Public URL used to access 10DB, for example http://192.168.0.47:56080"
         - container: APP_ALLOWED_ORIGINS
           description:
             en_us: "REQUIRED. Allowed browser origin, usually the same value as APP_BASE_URL"
@@ -78,7 +78,7 @@ x-casaos:
     - amd64
     - arm64
   main: app
-  port_map: "8080"
+  port_map: "56080"
   scheme: http
   hostname: ""
   index: /
@@ -100,4 +100,4 @@ x-casaos:
         REQUIRED: replace APP_MASTER_KEY with a strong random string and set
         PG_ADMIN_HOST / PG_ADMIN_PASSWORD for your existing PostgreSQL server.
         Also set APP_BASE_URL and APP_ALLOWED_ORIGINS to your CasaOS URL, for
-        example http://192.168.0.47:8080.
+        example http://192.168.0.47:56080.

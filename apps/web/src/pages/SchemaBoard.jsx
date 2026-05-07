@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Database, GitBranch, Code2, Save, Play, Pencil, ChevronDown } from 'lucide-react';
+import { Database, GitBranch, Code2, Save, Play, Pencil, ChevronDown, KeyRound } from 'lucide-react';
 import { SiMariadb, SiMysql, SiPostgresql, SiRedis, SiSqlite } from 'react-icons/si';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -521,18 +521,32 @@ export default function SchemaBoard() {
                         ) : (
                           <div className="flex items-start justify-between gap-2">
                             <h2 className="text-sm font-semibold text-foreground">{database.name}</h2>
-                            <button
-                              type="button"
-                              onMouseDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                startRenamingDatabase(database);
-                              }}
-                              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                              aria-label="Rename database"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  navigate(`/projects/${projectId}/databases/${database.id}/credentials`);
+                                }}
+                                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                                aria-label="View credentials"
+                              >
+                                <KeyRound className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  startRenamingDatabase(database);
+                                }}
+                                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                                aria-label="Rename database"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
                         )}
                         <p className="mt-1 font-mono text-xs text-muted-foreground">{database.pgDatabaseName}</p>

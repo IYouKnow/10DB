@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -60,6 +61,7 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Get("/projects", h.listProjects)
 			secure.Post("/projects", h.createProject)
 			secure.Get("/projects/{projectID}", h.getProject)
+			secure.Get("/databases/{databaseID}/credentials", h.databaseCredentials)
 			secure.Post("/projects/{projectID}/databases/postgres", h.provisionPostgres)
 			secure.Patch("/projects/{projectID}/databases/{databaseID}", h.updateProjectDatabase)
 			secure.Get("/projects/{projectID}/databases/{databaseID}/schema", h.getSchema)
@@ -410,6 +412,24 @@ func (h *Handler) projectConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, http.StatusOK, connection)
+}
+
+func (h *Handler) databaseCredentials(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.SessionFromContext(r.Context())
+	if !ok {
+		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
+		return
+	}
+	credentials, err := h.projects.DatabaseCredentials(r.Context(), session.UserID, chi.URLParam(r, "databaseID"))
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		Error(w, status, "database_credentials_failed", err.Error(), nil)
+		return
+	}
+	JSON(w, http.StatusOK, credentials)
 }
 
 func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {

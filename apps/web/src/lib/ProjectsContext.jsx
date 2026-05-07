@@ -94,6 +94,10 @@ export function ProjectsProvider({ children }) {
     return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema`);
   }, []);
 
+  const getDatabaseCredentials = useCallback(async (databaseId) => {
+    return request(`/api/v1/databases/${databaseId}/credentials`);
+  }, []);
+
   const saveDatabaseSchema = useCallback(async (projectId, databaseId, blueprint) => {
     return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema`, {
       method: 'PUT',
@@ -147,6 +151,7 @@ export function ProjectsProvider({ children }) {
     getProject,
     provisionPostgres,
     updateProjectDatabase,
+    getDatabaseCredentials,
     getDatabaseSchema,
     saveDatabaseSchema,
     listDatabaseTables,
@@ -154,7 +159,7 @@ export function ProjectsProvider({ children }) {
     deleteDatabaseTable,
     removeProvisionedPostgres,
     deleteProject,
-  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, updateProjectDatabase, getDatabaseSchema, saveDatabaseSchema, listDatabaseTables, applyDatabaseTable, deleteDatabaseTable, removeProvisionedPostgres, deleteProject]);
+  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, updateProjectDatabase, getDatabaseCredentials, getDatabaseSchema, saveDatabaseSchema, listDatabaseTables, applyDatabaseTable, deleteDatabaseTable, removeProvisionedPostgres, deleteProject]);
 
   return (
     <ProjectsContext.Provider value={value}>

@@ -146,6 +146,50 @@ func TestAdminCanExceedBothLimits(t *testing.T) {
 	}
 }
 
+func TestProvisionPostgresCreatesMainCredentialAndReturnsDatabaseURL(t *testing.T) {
+	service := newTestService(t, map[string]types.User{
+		"user-1": {ID: "user-1", Role: types.UserRoleUser},
+	})
+
+	ctx := context.Background()
+	project, err := service.Create(ctx, "user-1", CreateProjectInput{Name: "Project One", Slug: "project-one"})
+	if err != nil {
+		t.Fatalf("Create() project error = %v", err)
+	}
+
+	updatedProject, err := service.ProvisionPostgres(ctx, "user-1", project.ID, ProvisionPostgresInput{Name: "Main DB"})
+	if err != nil {
+		t.Fatalf("ProvisionPostgres() error = %v", err)
+	}
+	if len(updatedProject.Databases) != 1 {
+		t.Fatalf("len(updatedProject.Databases) = %d, want 1", len(updatedProject.Databases))
+	}
+
+	database := updatedProject.Databases[0]
+	credential, err := service.store.GetActiveMainDatabaseCredential(ctx, database.ID)
+	if err != nil {
+		t.Fatalf("GetActiveMainDatabaseCredential() error = %v", err)
+	}
+	if credential.Username != database.PGRoleName {
+		t.Fatalf("credential.Username = %q, want %q", credential.Username, database.PGRoleName)
+	}
+
+	view, err := service.DatabaseCredentials(ctx, "user-1", database.ID)
+	if err != nil {
+		t.Fatalf("DatabaseCredentials() error = %v", err)
+	}
+	if view.Username != database.PGRoleName {
+		t.Fatalf("view.Username = %q, want %q", view.Username, database.PGRoleName)
+	}
+	if view.Database != database.PGDatabaseName {
+		t.Fatalf("view.Database = %q, want %q", view.Database, database.PGDatabaseName)
+	}
+	wantPrefix := "postgres://"
+	if len(view.DatabaseURL) <= len(wantPrefix) || view.DatabaseURL[:len(wantPrefix)] != wantPrefix {
+		t.Fatalf("view.DatabaseURL = %q, want postgres:// prefix", view.DatabaseURL)
+	}
+}
+
 func TestLegacyDatabaseWithoutServerLinkReturnsManagedServerErrorOnDelete(t *testing.T) {
 	service := newTestService(t, map[string]types.User{
 		"user-1": {ID: "user-1", Role: types.UserRoleUser},

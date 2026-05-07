@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, GitBranch, Code2, Save, Play, ArrowLeft, Table2, Link2, FunctionSquare } from 'lucide-react';
+import { Plus, GitBranch, Code2, Save, Play, ArrowLeft, Table2, Link2, FunctionSquare, KeyRound } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import TableCard from '../components/schema/TableCard';
@@ -350,6 +350,13 @@ export default function DatabaseSchemaBoard() {
           <Button size="sm" variant="outline" className="h-7 text-xs text-muted-foreground" disabled>
             <GitBranch className="mr-1 h-3.5 w-3.5" /> Add Relation
           </Button>
+          <Link
+            to={`/projects/${projectId}/databases/${databaseId}/credentials`}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+            Credentials
+          </Link>
           <div className="flex-1" />
           <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => void persistTables(tables)}>
             <Save className="mr-1 h-3.5 w-3.5" /> Save Draft

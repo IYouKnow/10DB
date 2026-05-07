@@ -200,6 +200,24 @@ func (s *Service) ProvisionPostgres(ctx context.Context, ownerUserID, projectID 
 		return types.Project{}, err
 	}
 
+	credential := types.DatabaseCredential{
+		ID:         uuid.NewString(),
+		DatabaseID: database.ID,
+		Label:      "Main credentials",
+		Username:   roleName,
+		Password:   encryptedPassword,
+		Type:       "main",
+		CreatedAt:  time.Now().UTC(),
+	}
+	if err := s.store.CreateDatabaseCredential(ctx, credential); err != nil {
+		_ = s.postgres.DropProjectDatabaseWithConfig(ctx, adminConfig, dbName, roleName)
+		_ = s.store.DeleteProjectDatabase(ctx, project.ID, database.ID)
+		project.Status = types.ProjectStatusDraft
+		project.UpdatedAt = time.Now().UTC()
+		_ = s.store.UpdateProject(ctx, project)
+		return types.Project{}, err
+	}
+
 	database.Status = string(types.ProjectStatusReady)
 	database.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateProjectDatabase(ctx, database); err != nil {
@@ -296,6 +314,32 @@ func (s *Service) Connection(ctx context.Context, ownerUserID, projectID string)
 		return types.ProjectConnection{}, err
 	}
 	return postgres.BuildConnection(project, password), nil
+}
+
+func (s *Service) DatabaseCredentials(ctx context.Context, ownerUserID, databaseID string) (types.DatabaseCredentialsView, error) {
+	database, credential, password, err := s.loadDatabaseCredential(ctx, ownerUserID, databaseID)
+	if err != nil {
+		return types.DatabaseCredentialsView{}, err
+	}
+
+	projectConn := types.Project{
+		PGDatabaseName: database.PGDatabaseName,
+		PGRoleName:     credential.Username,
+		PGHost:         database.PGHost,
+		PGPort:         database.PGPort,
+		PGSSLMode:      database.PGSSLMode,
+	}
+	connection := postgres.BuildConnection(projectConn, password)
+
+	return types.DatabaseCredentialsView{
+		Username:    credential.Username,
+		Password:    password,
+		Database:    database.PGDatabaseName,
+		Host:        database.PGHost,
+		Port:        database.PGPort,
+		SSLMode:     database.PGSSLMode,
+		DatabaseURL: connection.DSN,
+	}, nil
 }
 
 func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID, databaseID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
@@ -491,23 +535,35 @@ func (s *Service) loadDatabaseConnection(ctx context.Context, ownerUserID, proje
 	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
 		return types.ProjectDatabase{}, types.Project{}, "", err
 	}
-	database, err := s.store.GetProjectDatabase(ctx, projectID, databaseID)
-	if err != nil {
-		return types.ProjectDatabase{}, types.Project{}, "", err
-	}
-	password, err := s.crypto.Decrypt(database.PGPasswordEncrypted)
+	database, credential, password, err := s.loadDatabaseCredential(ctx, ownerUserID, databaseID)
 	if err != nil {
 		return types.ProjectDatabase{}, types.Project{}, "", err
 	}
 	projectConn := types.Project{
 		ID:             projectID,
 		PGDatabaseName: database.PGDatabaseName,
-		PGRoleName:     database.PGRoleName,
+		PGRoleName:     credential.Username,
 		PGHost:         database.PGHost,
 		PGPort:         database.PGPort,
 		PGSSLMode:      database.PGSSLMode,
 	}
 	return database, projectConn, password, nil
+}
+
+func (s *Service) loadDatabaseCredential(ctx context.Context, ownerUserID, databaseID string) (types.ProjectDatabase, types.DatabaseCredential, string, error) {
+	database, err := s.store.GetProjectDatabaseByOwner(ctx, ownerUserID, databaseID)
+	if err != nil {
+		return types.ProjectDatabase{}, types.DatabaseCredential{}, "", err
+	}
+	credential, err := s.store.GetActiveMainDatabaseCredential(ctx, databaseID)
+	if err != nil {
+		return types.ProjectDatabase{}, types.DatabaseCredential{}, "", err
+	}
+	password, err := s.crypto.Decrypt(credential.Password)
+	if err != nil {
+		return types.ProjectDatabase{}, types.DatabaseCredential{}, "", err
+	}
+	return database, credential, password, nil
 }
 
 func (s *Service) Reset(ctx context.Context, ownerUserID, projectID string) error {

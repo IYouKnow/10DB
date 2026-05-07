@@ -228,20 +228,68 @@ func CreateProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, datab
 	}
 	defer pool.Close()
 
-	if _, err := pool.Exec(ctx, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD %s", quoteIdent(roleName), quoteLiteral(password))); err != nil {
+	if _, err := pool.Exec(ctx, fmt.Sprintf(
+		"CREATE ROLE %s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION PASSWORD %s",
+		quoteIdent(roleName),
+		quoteLiteral(password),
+	)); err != nil {
 		return err
 	}
 	if _, err := pool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s OWNER %s", quoteIdent(databaseName), quoteIdent(roleName))); err != nil {
 		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName)))
 		return err
 	}
+
+	// Remove default PUBLIC connectivity and grant the tenant role access only
+	// to its own database. This prevents connecting to other managed databases
+	// that would otherwise inherit PUBLIC CONNECT privileges.
+	if err := lockRoleToDatabase(ctx, pool, cfg.DBName, databaseName, roleName); err != nil {
+		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS %s", quoteIdent(databaseName)))
+		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName)))
+		return err
+	}
+
 	projectConn, err := pgx.Connect(ctx, buildDSN(cfg.Host, cfg.Port, databaseName, cfg.User, cfg.Password, cfg.SSLMode))
 	if err != nil {
 		return err
 	}
 	defer projectConn.Close(ctx)
+	if _, err := projectConn.Exec(ctx, `REVOKE ALL ON SCHEMA public FROM PUBLIC`); err != nil {
+		return err
+	}
+	if _, err := projectConn.Exec(ctx, fmt.Sprintf("GRANT USAGE, CREATE ON SCHEMA public TO %s", quoteIdent(roleName))); err != nil {
+		return err
+	}
 	_, err = projectConn.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`)
 	return err
+}
+
+func lockRoleToDatabase(ctx context.Context, pool *pgxpool.Pool, adminDatabaseName, databaseName, roleName string) error {
+	databases := []string{adminDatabaseName, databaseName}
+	if adminDatabaseName != "postgres" {
+		databases = append(databases, "postgres")
+	}
+
+	for _, name := range databases {
+		if _, err := pool.Exec(ctx, fmt.Sprintf("REVOKE CONNECT, TEMPORARY ON DATABASE %s FROM PUBLIC", quoteIdent(name))); err != nil {
+			return err
+		}
+	}
+
+	if _, err := pool.Exec(ctx, fmt.Sprintf("GRANT CONNECT, TEMPORARY ON DATABASE %s TO %s", quoteIdent(databaseName), quoteIdent(roleName))); err != nil {
+		return err
+	}
+	if adminDatabaseName != databaseName {
+		if _, err := pool.Exec(ctx, fmt.Sprintf("REVOKE CONNECT, TEMPORARY ON DATABASE %s FROM %s", quoteIdent(adminDatabaseName), quoteIdent(roleName))); err != nil {
+			return err
+		}
+	}
+	if adminDatabaseName != "postgres" && databaseName != "postgres" {
+		if _, err := pool.Exec(ctx, fmt.Sprintf("REVOKE CONNECT, TEMPORARY ON DATABASE %s FROM %s", quoteIdent("postgres"), quoteIdent(roleName))); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func DropProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, databaseName, roleName string) error {

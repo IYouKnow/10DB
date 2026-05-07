@@ -32,9 +32,8 @@ export default function Dashboard() {
     setIsCreatingProject(true);
 
     try {
-      const project = await createProject({ name });
+      await createProject({ name });
       setShowCreate(false);
-      navigate(`/projects/${project.id}/board`);
     } catch (error) {
       setCreateProjectError(error.message || 'Failed to create project');
     } finally {

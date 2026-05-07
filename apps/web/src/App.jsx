@@ -38,8 +38,8 @@ const DashboardApp = () => (
         <Route index element={<Navigate to="board" replace />} />
         <Route path="board" element={<SchemaBoard />} />
         <Route path="databases/:databaseId/schema" element={<DatabaseSchemaBoard />} />
+        <Route path="databases/:databaseId/credentials" element={<Credentials />} />
         <Route path="tables" element={<Tables />} />
-        <Route path="credentials" element={<Credentials />} />
         <Route path="sql" element={<SqlPreview />} />
         <Route path="backups" element={<Backups />} />
         <Route path="settings" element={<AppSettings />} />
