@@ -176,6 +176,8 @@ type TableBlueprint struct {
 	Name        string                `json:"name"`
 	DisplayName string                `json:"displayName,omitempty"`
 	Position    Position              `json:"position"`
+	Width       float64               `json:"width,omitempty"`
+	Height      float64               `json:"height,omitempty"`
 	Columns     []ColumnBlueprint     `json:"columns"`
 	ForeignKeys []ForeignKeyBlueprint `json:"foreignKeys"`
 }

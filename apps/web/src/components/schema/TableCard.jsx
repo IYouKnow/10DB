@@ -1,14 +1,16 @@
 
 import React from 'react';
-import { Key, Link2 } from 'lucide-react';
+import { Grip, Key, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export default function TableCard({ table, selected, onSelect, onColumnSelect, selectedColumn, style, onMouseDown, onContextMenu, onApply }) {
+const HEADER_HEIGHT = 46;
+
+export default function TableCard({ table, selected, onSelect, onColumnSelect, selectedColumn, style, onMouseDown, onContextMenu, onApply, onResizeMouseDown }) {
   return (
     <div
       style={style}
       className={cn(
-        'absolute w-56 rounded-xl border bg-card shadow-2xl shadow-black/30 cursor-grab select-none transition-shadow',
+        'absolute overflow-hidden rounded-xl border bg-card shadow-2xl shadow-black/30 cursor-grab select-none transition-shadow',
         selected ? 'border-primary/60 shadow-primary/10' : 'border-border hover:border-border/80'
       )}
       onMouseDown={onMouseDown}
@@ -23,10 +25,13 @@ export default function TableCard({ table, selected, onSelect, onColumnSelect, s
         'px-3 py-2 border-b flex items-center gap-2 rounded-t-xl',
         selected ? 'border-primary/30 bg-primary/5' : 'border-border bg-secondary/40'
       )}>
-        <div className={cn('w-2 h-2 rounded-full', selected ? 'bg-primary' : 'bg-primary/50')} />
-        <span className="font-mono text-xs font-semibold text-foreground">{table.name}</span>
+        <div className={cn('w-2 h-2 rounded-full shrink-0', selected ? 'bg-primary' : 'bg-primary/50')} />
+        <div className="min-w-0">
+          <div className="truncate font-mono text-xs font-semibold text-foreground">{table.name}</div>
+          <div className="truncate font-mono text-[10px] text-muted-foreground/70">{table.id}</div>
+        </div>
         <span className={cn(
-          'ml-auto rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.08em]',
+          'ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.08em]',
           table.status === 'applied'
             ? 'bg-emerald-500/12 text-emerald-300'
             : 'bg-amber-500/12 text-amber-300'
@@ -40,16 +45,19 @@ export default function TableCard({ table, selected, onSelect, onColumnSelect, s
               event.stopPropagation();
               onApply?.(table.id);
             }}
-            className="rounded-md border border-primary/25 px-1.5 py-0.5 text-[9px] font-semibold text-primary transition-colors hover:bg-primary/10"
+            className="shrink-0 rounded-md border border-primary/25 px-1.5 py-0.5 text-[9px] font-semibold text-primary transition-colors hover:bg-primary/10"
           >
             {table.isApplying ? 'Applying...' : 'Apply'}
           </button>
         )}
-        <span className="text-[10px] text-muted-foreground/50 font-mono">{table.columns.length} cols</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground/50 font-mono">{table.columns.length} cols</span>
       </div>
 
       {/* Columns */}
-      <div className="divide-y divide-border/40">
+      <div
+        className="divide-y divide-border/40 overflow-y-auto"
+        style={{ maxHeight: `calc(100% - ${HEADER_HEIGHT}px)` }}
+      >
         {table.columns.map((col) => (
           <div
             key={col.id}
@@ -71,6 +79,18 @@ export default function TableCard({ table, selected, onSelect, onColumnSelect, s
           </div>
         ))}
       </div>
+
+      <button
+        type="button"
+        onMouseDown={(event) => {
+          event.stopPropagation();
+          onResizeMouseDown?.(event);
+        }}
+        className="absolute bottom-1 right-1 flex h-5 w-5 cursor-se-resize items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-secondary/70 hover:text-foreground"
+        aria-label="Resize table"
+      >
+        <Grip className="h-3 w-3 rotate-45" />
+      </button>
     </div>
   );
 }

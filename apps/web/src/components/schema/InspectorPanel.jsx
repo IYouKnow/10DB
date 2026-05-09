@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { Database, Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useProjects } from '@/lib/ProjectsContext';
@@ -82,7 +82,7 @@ function ColumnForm({ value, onChange, disabled }) {
         <Input
           value={value.name}
           onChange={(event) => onChange({ ...value, name: event.target.value })}
-          className="h-8 font-mono text-xs"
+          className="h-9 font-mono text-sm"
           disabled={disabled}
           placeholder="column_name"
         />
@@ -94,7 +94,7 @@ function ColumnForm({ value, onChange, disabled }) {
           value={value.type}
           onChange={(event) => onChange({ ...value, type: event.target.value })}
           disabled={disabled}
-          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs font-mono text-foreground outline-none focus:ring-2 focus:ring-ring"
+          className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm font-mono text-foreground outline-none focus:ring-2 focus:ring-ring"
         >
           {COLUMN_TYPES.map((type) => (
             <option key={type} value={type}>{type}</option>
@@ -107,7 +107,7 @@ function ColumnForm({ value, onChange, disabled }) {
         <Input
           value={value.defaultValue}
           onChange={(event) => onChange({ ...value, defaultValue: event.target.value })}
-          className="h-8 font-mono text-xs"
+          className="h-9 font-mono text-sm"
           disabled={disabled}
           placeholder="Optional expression"
         />
@@ -135,6 +135,7 @@ export default function InspectorPanel({
   selectedColumn,
   onSelectColumn,
   onColumnsChange,
+  onUpdateTable,
   onClose,
 }) {
   const table = useMemo(() => tables.find((entry) => entry.id === selectedTable) ?? null, [selectedTable, tables]);
@@ -146,11 +147,27 @@ export default function InspectorPanel({
   const [createDraft, setCreateDraft] = useState(emptyColumnDraft());
   const [createError, setCreateError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [editDraft, setEditDraft] = useState(null);
   const [editError, setEditError] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState('');
+  const [tableName, setTableName] = useState('');
+  const [tableError, setTableError] = useState('');
+  const [isSavingTable, setIsSavingTable] = useState(false);
+
+  useEffect(() => {
+    setTableName(table?.name ?? '');
+    setTableError('');
+  }, [table?.id, table?.name]);
+
+  useEffect(() => {
+    if (selectedColumn?.colId) {
+      setShowCreateForm(false);
+      setCreateError('');
+    }
+  }, [selectedColumn?.colId]);
 
   useEffect(() => {
     if (!tableId) {
@@ -211,6 +228,28 @@ export default function InspectorPanel({
     onColumnsChange?.(table.id, normalizeColumns(nextColumns));
   };
 
+  const handleSaveTable = async () => {
+    if (!onUpdateTable) {
+      return;
+    }
+
+    const nextName = tableName.trim();
+    if (!nextName) {
+      setTableError('Table name is required.');
+      return;
+    }
+
+    setIsSavingTable(true);
+    setTableError('');
+    try {
+      await onUpdateTable({ ...table, name: nextName });
+    } catch (error) {
+      setTableError(error.message || 'Failed to save table');
+    } finally {
+      setIsSavingTable(false);
+    }
+  };
+
   const handleCreate = async () => {
     setIsCreating(true);
     setCreateError('');
@@ -219,6 +258,7 @@ export default function InspectorPanel({
       const nextColumns = [...columns, created];
       syncColumns(nextColumns);
       setCreateDraft(emptyColumnDraft());
+      setShowCreateForm(false);
       onSelectColumn?.(table.id, created.id);
     } catch (error) {
       setCreateError(error.message || 'Failed to add column');
@@ -269,23 +309,29 @@ export default function InspectorPanel({
   const selectedColumnRecord = columns.find((column) => column.id === editingId) ?? null;
 
   return (
-    <div className="flex w-80 shrink-0 flex-col border-l border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <div className="text-xs font-semibold text-foreground">Table Editor</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">Draft columns only</div>
+    <div className="relative flex w-[27rem] shrink-0 flex-col border-l border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10">
+            <Database className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-foreground">Table Editor</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">Edit draft table details and columns</div>
+          </div>
         </div>
         <button onClick={onClose} className="text-muted-foreground transition-colors hover:text-foreground">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <div className="space-y-5 overflow-y-auto px-4 py-4">
-        <div className="rounded-xl border border-border bg-secondary/20 p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Table</div>
-          <div className="mt-1 font-mono text-sm text-foreground">{table.name}</div>
-          <div className="mt-3 flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Status</span>
+      <div className="space-y-5 overflow-y-auto px-5 py-5">
+        <div className="space-y-3 rounded-2xl border border-border bg-secondary/20 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Table</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">Basic draft metadata for this table.</div>
+            </div>
             <span className={cn(
               'rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wider',
               table.status === 'applied' ? 'bg-chart-3/10 text-chart-3' : 'bg-amber-500/10 text-amber-300',
@@ -293,36 +339,73 @@ export default function InspectorPanel({
               {table.status}
             </span>
           </div>
+
+          <ErrorBanner message={tableError} />
+
+          <div>
+            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Table Name</label>
+            <Input
+              value={tableName}
+              onChange={(event) => setTableName(event.target.value)}
+              className="h-9 font-mono text-sm"
+              disabled={isSavingTable}
+              placeholder="table_name"
+            />
+          </div>
+
+          <div className="flex items-center justify-end">
+            <Button size="sm" onClick={handleSaveTable} disabled={isSavingTable || !tableName.trim()}>
+              <Save className="h-3.5 w-3.5" />
+              {isSavingTable ? 'Saving...' : 'Save Table'}
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Columns</div>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">Select one to edit or delete it.</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">Select a draft column to edit or delete it.</div>
             </div>
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+            <div className="flex items-center gap-2">
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setEditingId('');
+                  setEditDraft(null);
+                  setEditError('');
+                  setCreateError('');
+                  setCreateDraft(emptyColumnDraft());
+                  setShowCreateForm(true);
+                }}
+                className="h-8 px-2.5"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
 
           <ErrorBanner message={loadingError} />
 
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {columns.map((column) => (
               <button
                 key={column.id}
                 type="button"
                 onClick={() => onSelectColumn?.(table.id, column.id)}
                 className={cn(
-                  'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors',
+                  'flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors',
                   editingId === column.id ? 'border-primary/30 bg-primary/10' : 'border-border hover:bg-secondary/40',
                 )}
               >
                 <div className="min-w-0">
-                  <div className="truncate font-mono text-xs text-foreground">{column.name}</div>
+                  <div className="truncate font-mono text-sm text-foreground">{column.name}</div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
                     {column.type}
-                    {column.primaryKey ? ' • primary key' : ''}
-                    {column.nullable ? ' • nullable' : ' • required'}
+                    {column.primaryKey ? ' - primary key' : ''}
+                    {column.nullable ? ' - nullable' : ' - required'}
                   </div>
                 </div>
                 <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -337,53 +420,74 @@ export default function InspectorPanel({
           </div>
         </div>
 
-        <div className="space-y-3 rounded-2xl border border-border p-4">
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Add Column</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">Create a new draft column for this table.</div>
-          </div>
-          <ErrorBanner message={createError} />
-          <ColumnForm value={createDraft} onChange={setCreateDraft} disabled={isCreating} />
-          <Button size="sm" onClick={handleCreate} disabled={isCreating || !createDraft.name.trim()}>
-            <Plus className="h-3.5 w-3.5" />
-            {isCreating ? 'Adding...' : 'Add Column'}
-          </Button>
-        </div>
-
-        <div className="space-y-3 rounded-2xl border border-border p-4">
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Edit Column</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              {selectedColumnRecord ? `Editing ${selectedColumnRecord.name}` : 'Select a column from the list above.'}
-            </div>
-          </div>
-          <ErrorBanner message={editError} />
-          {editDraft && selectedColumnRecord ? (
-            <>
-              <ColumnForm value={editDraft} onChange={setEditDraft} disabled={isSavingEdit || deletingId === editingId} />
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
-                  <Save className="h-3.5 w-3.5" />
-                  {isSavingEdit ? 'Saving...' : 'Save Changes'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleDelete(editingId)}
-                  disabled={deletingId === editingId}
-                  className="border-destructive/20 text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {deletingId === editingId ? 'Deleting...' : 'Delete'}
-                </Button>
+        {showCreateForm ? (
+          <div className="space-y-3 rounded-2xl border border-border p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Add Column</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">Create a new draft column for this table.</div>
               </div>
-            </>
-          ) : (
-            <div className="rounded-xl border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-              Pick a column to edit its fields.
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setCreateError('');
+                }}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
-          )}
-        </div>
+            <ErrorBanner message={createError} />
+            <ColumnForm value={createDraft} onChange={setCreateDraft} disabled={isCreating} />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={handleCreate} disabled={isCreating || !createDraft.name.trim()} className="flex-1">
+                <Plus className="h-3.5 w-3.5" />
+                {isCreating ? 'Adding...' : 'Add Column'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setCreateError('');
+                }}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {editDraft && selectedColumnRecord ? (
+          <div className="space-y-3 rounded-2xl border border-border p-4">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Edit Column</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                Editing {selectedColumnRecord.name}
+              </div>
+            </div>
+            <ErrorBanner message={editError} />
+            <ColumnForm value={editDraft} onChange={setEditDraft} disabled={isSavingEdit || deletingId === editingId} />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit} className="flex-1">
+                <Save className="h-3.5 w-3.5" />
+                {isSavingEdit ? 'Saving...' : 'Save Changes'}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDelete(editingId)}
+                disabled={deletingId === editingId}
+                className="flex-1 border-destructive/20 text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deletingId === editingId ? 'Deleting...' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

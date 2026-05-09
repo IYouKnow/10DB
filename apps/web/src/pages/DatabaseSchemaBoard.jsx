@@ -8,6 +8,13 @@ import InspectorPanel from '../components/schema/InspectorPanel';
 import { useProjects } from '@/lib/ProjectsContext';
 import { toast } from 'sonner';
 
+const DEFAULT_TABLE_WIDTH = 224;
+const DEFAULT_TABLE_HEIGHT = 220;
+const MIN_TABLE_WIDTH = 224;
+const MIN_TABLE_HEIGHT = 160;
+const MAX_TABLE_WIDTH = 520;
+const MAX_TABLE_HEIGHT = 640;
+
 function blueprintToTables(blueprint, appliedTableNames) {
   const applied = new Set(appliedTableNames);
   return (blueprint?.tables ?? []).map((table) => ({
@@ -15,6 +22,8 @@ function blueprintToTables(blueprint, appliedTableNames) {
     name: table.name,
     x: table.position?.x ?? 120,
     y: table.position?.y ?? 120,
+    width: table.width ?? DEFAULT_TABLE_WIDTH,
+    height: table.height ?? DEFAULT_TABLE_HEIGHT,
     status: applied.has(table.name) ? 'applied' : 'draft',
     isApplying: false,
     columns: (table.columns ?? []).map((column) => ({
@@ -38,6 +47,8 @@ function tablesToBlueprint(projectId, databaseId, tables) {
       id: table.id,
       name: table.name,
       position: { x: table.x, y: table.y },
+      width: table.width,
+      height: table.height,
       columns: table.columns.map((column) => ({
         id: column.id,
         name: column.name,
@@ -90,6 +101,7 @@ export default function DatabaseSchemaBoard() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [deletingTableId, setDeletingTableId] = useState(null);
   const dragging = useRef(null);
+  const resizing = useRef(null);
   const { getDatabaseSchema, saveDatabaseSchema, listDatabaseTables, applyDatabaseTable, deleteDatabaseTable } = useProjects();
 
   const persistTables = useCallback(async (nextTables, options = {}) => {
@@ -146,6 +158,9 @@ export default function DatabaseSchemaBoard() {
     if (event.button !== 0) {
       return;
     }
+    if (resizing.current) {
+      return;
+    }
 
     const table = tables.find((entry) => entry.id === tableId);
     if (!table) {
@@ -161,6 +176,18 @@ export default function DatabaseSchemaBoard() {
   }, [tables]);
 
   const handleMouseMove = useCallback((event) => {
+    if (resizing.current) {
+      const { tableId, startWidth, startHeight, startClientX, startClientY } = resizing.current;
+      const nextWidth = Math.max(MIN_TABLE_WIDTH, Math.min(MAX_TABLE_WIDTH, startWidth + (event.clientX - startClientX)));
+      const nextHeight = Math.max(MIN_TABLE_HEIGHT, Math.min(MAX_TABLE_HEIGHT, startHeight + (event.clientY - startClientY)));
+      setTables((current) => current.map((table) => (
+        table.id === tableId
+          ? { ...table, width: nextWidth, height: nextHeight }
+          : table
+      )));
+      return;
+    }
+
     if (!dragging.current) {
       return;
     }
@@ -174,6 +201,12 @@ export default function DatabaseSchemaBoard() {
   }, []);
 
   const handleMouseUp = useCallback(() => {
+    if (resizing.current) {
+      const nextTables = tables.map((table) => ({ ...table }));
+      void persistTables(nextTables, { silent: true });
+      resizing.current = null;
+      return;
+    }
     if (dragging.current) {
       const nextTables = tables.map((table) => ({ ...table }));
       void persistTables(nextTables, { silent: true });
@@ -194,6 +227,8 @@ export default function DatabaseSchemaBoard() {
       name: tableName,
       x: 120 + Math.random() * 220,
       y: 120 + Math.random() * 120,
+      width: DEFAULT_TABLE_WIDTH,
+      height: DEFAULT_TABLE_HEIGHT,
       status: 'draft',
       isApplying: false,
       columns: [
@@ -233,6 +268,25 @@ export default function DatabaseSchemaBoard() {
       table.id === tableId ? { ...table, columns: nextColumns } : table
     )));
   }, []);
+
+  const handleResizeStart = useCallback((event, tableId) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const table = tables.find((entry) => entry.id === tableId);
+    if (!table) {
+      return;
+    }
+    resizing.current = {
+      tableId,
+      startWidth: table.width ?? DEFAULT_TABLE_WIDTH,
+      startHeight: table.height ?? DEFAULT_TABLE_HEIGHT,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+    };
+    event.preventDefault();
+    event.stopPropagation();
+  }, [tables]);
 
   const handleUpdateTable = (updated) => {
     const nextTables = tables.map((table) => (
@@ -413,8 +467,9 @@ export default function DatabaseSchemaBoard() {
                   onColumnSelect={handleSelectColumn}
                   onContextMenu={handleTableContextMenu}
                   onApply={handleApplyTable}
-                  style={{ left: table.x, top: table.y }}
+                  style={{ left: table.x, top: table.y, width: table.width, height: table.height }}
                   onMouseDown={(event) => handleMouseDown(event, table.id)}
+                  onResizeMouseDown={(event) => handleResizeStart(event, table.id)}
                 />
               ))}
             </>
@@ -490,6 +545,7 @@ export default function DatabaseSchemaBoard() {
           selectedColumn={selectedColumn}
           onSelectColumn={handleSelectColumn}
           onColumnsChange={handleColumnsChange}
+          onUpdateTable={handleUpdateTable}
           onClose={() => setShowInspector(false)}
         />
       )}
