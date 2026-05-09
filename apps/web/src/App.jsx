@@ -8,7 +8,7 @@ import Dashboard from './pages/Dashboard';
 import SchemaBoard from './pages/SchemaBoard';
 import DatabaseSchemaBoard from './pages/DatabaseSchemaBoard';
 import Tables from './pages/Tables';
-import Credentials from './pages/Credentials';
+import ApiKeys from './pages/ApiKeys';
 import SqlPreview from './pages/SqlPreview';
 import Backups from './pages/Backups';
 import AppSettings from './pages/AppSettings';
@@ -34,11 +34,11 @@ const DashboardApp = () => (
           <Route path="databases" element={<AdminPlaceholder title="Databases" />} />
         </Route>
       </Route>
-      <Route path="/projects/:projectId" element={<AppLayout />}>
+        <Route path="/projects/:projectId" element={<AppLayout />}>
         <Route index element={<Navigate to="board" replace />} />
         <Route path="board" element={<SchemaBoard />} />
         <Route path="databases/:databaseId/schema" element={<DatabaseSchemaBoard />} />
-        <Route path="databases/:databaseId/credentials" element={<Credentials />} />
+        <Route path="databases/:databaseId/api-keys" element={<ApiKeys />} />
         <Route path="tables" element={<Tables />} />
         <Route path="sql" element={<SqlPreview />} />
         <Route path="backups" element={<Backups />} />

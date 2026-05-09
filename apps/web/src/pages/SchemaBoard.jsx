@@ -527,18 +527,6 @@ export default function SchemaBoard() {
                                 onMouseDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  navigate(`/projects/${projectId}/databases/${database.id}/credentials`);
-                                }}
-                                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                                aria-label="View credentials"
-                              >
-                                <KeyRound className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  event.stopPropagation();
                                   startRenamingDatabase(database);
                                 }}
                                 className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -575,6 +563,17 @@ export default function SchemaBoard() {
                       <div className="rounded-md bg-secondary px-2 py-1 text-[11px] text-muted-foreground">
                         {database.status}
                       </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate(`/projects/${projectId}/databases/${database.id}/api-keys`);
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        className="ml-auto rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                      >
+                        API Keys
+                      </button>
                     </div>
                   </div>
                 );

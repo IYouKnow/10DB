@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -169,7 +171,7 @@ func (s *Service) ListColumns(ctx context.Context, project types.Project, passwo
 }
 
 func (s *Service) ListRows(ctx context.Context, project types.Project, password, tableName string, limit, offset int) (types.TableRows, error) {
-	conn, err := pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
+	conn, err := s.connectProject(ctx, project, password)
 	if err != nil {
 		return types.TableRows{}, err
 	}
@@ -200,25 +202,110 @@ func (s *Service) ListRows(ctx context.Context, project types.Project, password,
 	return types.TableRows{Columns: columns, Rows: items, Limit: limit, Offset: offset}, rows.Err()
 }
 
-func BuildConnection(project types.Project, password string) types.ProjectConnection {
-	dsn := buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode)
-	return types.ProjectConnection{
-		Host:     project.PGHost,
-		Port:     project.PGPort,
-		Database: project.PGDatabaseName,
-		Username: project.PGRoleName,
-		Password: password,
-		SSLMode:  project.PGSSLMode,
-		DSN:      dsn,
-		EnvExample: fmt.Sprintf("DATABASE_URL=%s\nPGHOST=%s\nPGPORT=%d\nPGDATABASE=%s\nPGUSER=%s\nPGPASSWORD=%s\n",
-			dsn,
-			project.PGHost,
-			project.PGPort,
-			project.PGDatabaseName,
-			project.PGRoleName,
-			password,
-		),
+func (s *Service) ListDataRows(ctx context.Context, project types.Project, password, tableName string, limit int) (types.TableRows, error) {
+	conn, err := s.connectProject(ctx, project, password)
+	if err != nil {
+		return types.TableRows{}, err
 	}
+	defer conn.Close(ctx)
+
+	query := fmt.Sprintf(`SELECT * FROM %s ORDER BY id::text LIMIT $1`, quoteIdent(tableName))
+	rows, err := conn.Query(ctx, query, limit)
+	if err != nil {
+		return types.TableRows{}, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows, limit, 0)
+}
+
+func (s *Service) GetDataRow(ctx context.Context, project types.Project, password, tableName, id string) (map[string]any, error) {
+	conn, err := s.connectProject(ctx, project, password)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	query := fmt.Sprintf(`SELECT * FROM %s WHERE id::text = $1 LIMIT 1`, quoteIdent(tableName))
+	return querySingleRow(ctx, conn, query, id)
+}
+
+func (s *Service) InsertDataRow(ctx context.Context, project types.Project, password, tableName string, values map[string]any) (map[string]any, error) {
+	conn, err := s.connectProject(ctx, project, password)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	if len(values) == 0 {
+		query := fmt.Sprintf(`INSERT INTO %s DEFAULT VALUES RETURNING *`, quoteIdent(tableName))
+		return querySingleRow(ctx, conn, query)
+	}
+
+	keys := sortedMapKeys(values)
+	quotedColumns := make([]string, 0, len(keys))
+	placeholders := make([]string, 0, len(keys))
+	args := make([]any, 0, len(keys))
+	for index, key := range keys {
+		quotedColumns = append(quotedColumns, quoteIdent(key))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index+1))
+		args = append(args, values[key])
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO %s (%s) VALUES (%s) RETURNING *`,
+		quoteIdent(tableName),
+		strings.Join(quotedColumns, ", "),
+		strings.Join(placeholders, ", "),
+	)
+	return querySingleRow(ctx, conn, query, args...)
+}
+
+func (s *Service) UpdateDataRow(ctx context.Context, project types.Project, password, tableName, id string, values map[string]any) (map[string]any, error) {
+	conn, err := s.connectProject(ctx, project, password)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	if len(values) == 0 {
+		query := fmt.Sprintf(`SELECT * FROM %s WHERE id::text = $1 LIMIT 1`, quoteIdent(tableName))
+		return querySingleRow(ctx, conn, query, id)
+	}
+
+	keys := sortedMapKeys(values)
+	setClauses := make([]string, 0, len(keys))
+	args := make([]any, 0, len(keys)+1)
+	for index, key := range keys {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", quoteIdent(key), index+1))
+		args = append(args, values[key])
+	}
+	args = append(args, id)
+
+	query := fmt.Sprintf(
+		`UPDATE %s SET %s WHERE id::text = $%d RETURNING *`,
+		quoteIdent(tableName),
+		strings.Join(setClauses, ", "),
+		len(args),
+	)
+	return querySingleRow(ctx, conn, query, args...)
+}
+
+func (s *Service) DeleteDataRow(ctx context.Context, project types.Project, password, tableName, id string) error {
+	conn, err := s.connectProject(ctx, project, password)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	commandTag, err := conn.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id::text = $1`, quoteIdent(tableName)), id)
+	if err != nil {
+		return err
+	}
+	if commandTag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func CreateProjectDatabaseWithConfig(ctx context.Context, cfg AdminConfig, databaseName, roleName, password string) error {
@@ -322,6 +409,10 @@ func TestAdminConnection(ctx context.Context, cfg AdminConfig) error {
 	return conn.Ping(ctx)
 }
 
+func (s *Service) connectProject(ctx context.Context, project types.Project, password string) (*pgx.Conn, error) {
+	return pgx.Connect(ctx, buildDSN(project.PGHost, project.PGPort, project.PGDatabaseName, project.PGRoleName, password, project.PGSSLMode))
+}
+
 func buildDSN(host string, port int, dbName, user, password, sslMode string) string {
 	return fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
@@ -340,4 +431,58 @@ func quoteIdent(value string) string {
 
 func quoteLiteral(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func scanRows(rows pgx.Rows, limit, offset int) (types.TableRows, error) {
+	fieldDescriptions := rows.FieldDescriptions()
+	columns := make([]string, 0, len(fieldDescriptions))
+	for _, fd := range fieldDescriptions {
+		columns = append(columns, string(fd.Name))
+	}
+
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return types.TableRows{}, err
+		}
+		row := map[string]any{}
+		for index, name := range columns {
+			row[name] = values[index]
+		}
+		items = append(items, row)
+	}
+	if err := rows.Err(); err != nil {
+		return types.TableRows{}, err
+	}
+	return types.TableRows{Columns: columns, Rows: items, Limit: limit, Offset: offset}, nil
+}
+
+func querySingleRow(ctx context.Context, conn *pgx.Conn, query string, args ...any) (map[string]any, error) {
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result, err := scanRows(rows, 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Rows) == 0 {
+		return nil, pgx.ErrNoRows
+	}
+	if len(result.Rows) > 1 {
+		return nil, errors.New("expected a single row")
+	}
+	return result.Rows[0], nil
+}
+
+func sortedMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

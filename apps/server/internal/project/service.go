@@ -29,6 +29,11 @@ type postgresProvider interface {
 	ListTables(ctx context.Context, project types.Project, password string) ([]types.TableInfo, error)
 	ListColumns(ctx context.Context, project types.Project, password, tableName string) ([]types.ColumnInfo, error)
 	ListRows(ctx context.Context, project types.Project, password, tableName string, limit, offset int) (types.TableRows, error)
+	ListDataRows(ctx context.Context, project types.Project, password, tableName string, limit int) (types.TableRows, error)
+	GetDataRow(ctx context.Context, project types.Project, password, tableName, id string) (map[string]any, error)
+	InsertDataRow(ctx context.Context, project types.Project, password, tableName string, values map[string]any) (map[string]any, error)
+	UpdateDataRow(ctx context.Context, project types.Project, password, tableName, id string, values map[string]any) (map[string]any, error)
+	DeleteDataRow(ctx context.Context, project types.Project, password, tableName, id string) error
 }
 
 type Service struct {
@@ -301,47 +306,6 @@ func (s *Service) RemoveProvisionedPostgres(ctx context.Context, ownerUserID, pr
 	return s.store.GetProject(ctx, ownerUserID, projectID)
 }
 
-func (s *Service) Connection(ctx context.Context, ownerUserID, projectID string) (types.ProjectConnection, error) {
-	project, err := s.store.GetProject(ctx, ownerUserID, projectID)
-	if err != nil {
-		return types.ProjectConnection{}, err
-	}
-	if project.PGDatabaseName == "" {
-		return types.ProjectConnection{}, errors.New("project does not have a provisioned database yet")
-	}
-	password, err := s.crypto.Decrypt(project.PGPasswordEncrypted)
-	if err != nil {
-		return types.ProjectConnection{}, err
-	}
-	return postgres.BuildConnection(project, password), nil
-}
-
-func (s *Service) DatabaseCredentials(ctx context.Context, ownerUserID, databaseID string) (types.DatabaseCredentialsView, error) {
-	database, credential, password, err := s.loadDatabaseCredential(ctx, ownerUserID, databaseID)
-	if err != nil {
-		return types.DatabaseCredentialsView{}, err
-	}
-
-	projectConn := types.Project{
-		PGDatabaseName: database.PGDatabaseName,
-		PGRoleName:     credential.Username,
-		PGHost:         database.PGHost,
-		PGPort:         database.PGPort,
-		PGSSLMode:      database.PGSSLMode,
-	}
-	connection := postgres.BuildConnection(projectConn, password)
-
-	return types.DatabaseCredentialsView{
-		Username:    credential.Username,
-		Password:    password,
-		Database:    database.PGDatabaseName,
-		Host:        database.PGHost,
-		Port:        database.PGPort,
-		SSLMode:     database.PGSSLMode,
-		DatabaseURL: connection.DSN,
-	}, nil
-}
-
 func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID, databaseID string, blueprint types.SchemaBlueprint) (types.SchemaRevision, map[string]string, error) {
 	if _, err := s.store.GetProject(ctx, ownerUserID, projectID); err != nil {
 		return types.SchemaRevision{}, nil, err
@@ -363,7 +327,15 @@ func (s *Service) SaveSchema(ctx context.Context, ownerUserID, projectID, databa
 		return types.SchemaRevision{}, nil, err
 	}
 	revision, err := s.store.SaveSchemaRevision(ctx, projectID, blueprint, hash, sql)
-	return revision, nil, err
+	if err != nil {
+		return types.SchemaRevision{}, nil, err
+	}
+	for _, table := range blueprint.Tables {
+		if syncErr := s.store.ReplaceDraftTableColumns(ctx, table.ID, draftColumnsFromTable(table)); syncErr != nil {
+			return types.SchemaRevision{}, nil, syncErr
+		}
+	}
+	return revision, nil, nil
 }
 
 func (s *Service) LatestSchema(ctx context.Context, ownerUserID, projectID, databaseID string) (types.SchemaRevision, error) {

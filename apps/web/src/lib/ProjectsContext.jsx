@@ -94,8 +94,47 @@ export function ProjectsProvider({ children }) {
     return request(`/api/v1/projects/${projectId}/databases/${databaseId}/schema`);
   }, []);
 
-  const getDatabaseCredentials = useCallback(async (databaseId) => {
-    return request(`/api/v1/databases/${databaseId}/credentials`);
+  const listDatabaseApiKeys = useCallback(async (databaseId) => {
+    const data = await request(`/api/v1/databases/${databaseId}/api-keys`);
+    return data.apiKeys ?? [];
+  }, []);
+
+  const listDraftTableColumns = useCallback(async (tableId) => {
+    const data = await request(`/api/v1/tables/${tableId}/columns`);
+    return data.columns ?? [];
+  }, []);
+
+  const createDraftTableColumn = useCallback(async (tableId, input) => {
+    return request(`/api/v1/tables/${tableId}/columns`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }, []);
+
+  const updateDraftTableColumn = useCallback(async (tableId, columnId, input) => {
+    return request(`/api/v1/tables/${tableId}/columns/${columnId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  }, []);
+
+  const deleteDraftTableColumn = useCallback(async (tableId, columnId) => {
+    return request(`/api/v1/tables/${tableId}/columns/${columnId}`, {
+      method: 'DELETE',
+    });
+  }, []);
+
+  const createDatabaseApiKey = useCallback(async (databaseId, input) => {
+    return request(`/api/v1/databases/${databaseId}/api-keys`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }, []);
+
+  const revokeDatabaseApiKey = useCallback(async (databaseId, keyId) => {
+    return request(`/api/v1/databases/${databaseId}/api-keys/${keyId}`, {
+      method: 'DELETE',
+    });
   }, []);
 
   const saveDatabaseSchema = useCallback(async (projectId, databaseId, blueprint) => {
@@ -151,7 +190,13 @@ export function ProjectsProvider({ children }) {
     getProject,
     provisionPostgres,
     updateProjectDatabase,
-    getDatabaseCredentials,
+    listDatabaseApiKeys,
+    listDraftTableColumns,
+    createDraftTableColumn,
+    updateDraftTableColumn,
+    deleteDraftTableColumn,
+    createDatabaseApiKey,
+    revokeDatabaseApiKey,
     getDatabaseSchema,
     saveDatabaseSchema,
     listDatabaseTables,
@@ -159,7 +204,7 @@ export function ProjectsProvider({ children }) {
     deleteDatabaseTable,
     removeProvisionedPostgres,
     deleteProject,
-  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, updateProjectDatabase, getDatabaseCredentials, getDatabaseSchema, saveDatabaseSchema, listDatabaseTables, applyDatabaseTable, deleteDatabaseTable, removeProvisionedPostgres, deleteProject]);
+  }), [projects, isLoadingProjects, projectsError, loadProjects, createProject, getProject, provisionPostgres, updateProjectDatabase, listDatabaseApiKeys, listDraftTableColumns, createDraftTableColumn, updateDraftTableColumn, deleteDraftTableColumn, createDatabaseApiKey, revokeDatabaseApiKey, getDatabaseSchema, saveDatabaseSchema, listDatabaseTables, applyDatabaseTable, deleteDatabaseTable, removeProvisionedPostgres, deleteProject]);
 
   return (
     <ProjectsContext.Provider value={value}>

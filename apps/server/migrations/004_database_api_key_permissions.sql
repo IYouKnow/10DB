@@ -1,0 +1,3 @@
+-- No-op migration.
+-- The permission column is ensured in project.Store.EnsureSchema(), and the
+-- current migration runner replays SQL files on every startup.

@@ -55,7 +55,7 @@ export default function AuthPage() {
 
           <h1 className="max-w-xl text-4xl font-bold tracking-tight">Sign in to manage your database projects.</h1>
           <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground">
-            Create an account to keep projects private to each user, then jump straight into schema design and credentials for the databases you own.
+            Create an account to keep projects private to each user, then jump straight into schema design and API access for the databases you own.
           </p>
         </div>
 

@@ -76,6 +76,32 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_credentials_one_active_main
 			ON database_credentials(database_id)
 			WHERE type = 'main' AND revoked_at IS NULL`,
+		`CREATE TABLE IF NOT EXISTS database_api_keys (
+			id TEXT PRIMARY KEY,
+			database_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			key_hash TEXT NOT NULL,
+			key_prefix TEXT NOT NULL,
+			permission TEXT NOT NULL DEFAULT 'read_write',
+			revoked_at TEXT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(database_id) REFERENCES project_databases(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_api_keys_database_id ON database_api_keys(database_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_api_keys_key_hash ON database_api_keys(key_hash)`,
+		`CREATE TABLE IF NOT EXISTS table_columns (
+			id TEXT PRIMARY KEY,
+			table_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			type TEXT NOT NULL,
+			nullable INTEGER NOT NULL DEFAULT 1,
+			primary_key INTEGER NOT NULL DEFAULT 0,
+			default_value TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_table_columns_table_id ON table_columns(table_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_table_columns_table_name ON table_columns(table_id, name)`,
 		`CREATE TABLE IF NOT EXISTS database_servers (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -106,7 +132,17 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if err := ensureColumn(ctx, s.db, "schema_revisions", "database_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_schema_revisions_project_version`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_revisions_project_database_version ON schema_revisions(project_id, database_id, version_number)`); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_schema_revisions_database_id ON schema_revisions(database_id, version_number DESC)`); err != nil {
+		return err
+	}
+
+	if err := ensureColumn(ctx, s.db, "database_api_keys", "permission", "TEXT NOT NULL DEFAULT 'read_write'"); err != nil {
 		return err
 	}
 

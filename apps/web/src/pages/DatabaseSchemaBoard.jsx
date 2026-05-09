@@ -187,7 +187,7 @@ export default function DatabaseSchemaBoard() {
     setMenu(null);
   };
 
-  const addTable = () => {
+  const addTable = async () => {
     const tableName = buildUniqueTableName(tables);
     const newTable = {
       id: `tbl_${Date.now()}`,
@@ -210,7 +210,7 @@ export default function DatabaseSchemaBoard() {
     };
 
     const nextTables = [...tables, newTable];
-    void persistTables(nextTables, { silent: true });
+    await persistTables(nextTables, { silent: true });
     setSelectedTable(newTable.id);
     setSelectedColumn(null);
     setShowInspector(true);
@@ -227,6 +227,12 @@ export default function DatabaseSchemaBoard() {
     setSelectedColumn({ tableId, colId });
     setShowInspector(true);
   };
+
+  const handleColumnsChange = useCallback((tableId, nextColumns) => {
+    setTables((current) => current.map((table) => (
+      table.id === tableId ? { ...table, columns: nextColumns } : table
+    )));
+  }, []);
 
   const handleUpdateTable = (updated) => {
     const nextTables = tables.map((table) => (
@@ -258,7 +264,7 @@ export default function DatabaseSchemaBoard() {
   };
 
   const handleAddTableFromMenu = () => {
-    addTable();
+    void addTable();
     setMenu(null);
   };
 
@@ -351,11 +357,11 @@ export default function DatabaseSchemaBoard() {
             <GitBranch className="mr-1 h-3.5 w-3.5" /> Add Relation
           </Button>
           <Link
-            to={`/projects/${projectId}/databases/${databaseId}/credentials`}
+            to={`/projects/${projectId}/databases/${databaseId}/api-keys`}
             className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
             <KeyRound className="h-3.5 w-3.5" />
-            Credentials
+            API Keys
           </Link>
           <div className="flex-1" />
           <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => void persistTables(tables)}>
@@ -482,7 +488,8 @@ export default function DatabaseSchemaBoard() {
           tables={tables}
           selectedTable={selectedTable}
           selectedColumn={selectedColumn}
-          onUpdateTable={handleUpdateTable}
+          onSelectColumn={handleSelectColumn}
+          onColumnsChange={handleColumnsChange}
           onClose={() => setShowInspector(false)}
         />
       )}

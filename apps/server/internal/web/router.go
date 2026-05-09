@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -61,7 +60,9 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Get("/projects", h.listProjects)
 			secure.Post("/projects", h.createProject)
 			secure.Get("/projects/{projectID}", h.getProject)
-			secure.Get("/databases/{databaseID}/credentials", h.databaseCredentials)
+			secure.Get("/databases/{databaseID}/api-keys", h.listDatabaseAPIKeys)
+			secure.Post("/databases/{databaseID}/api-keys", h.createDatabaseAPIKey)
+			secure.Delete("/databases/{databaseID}/api-keys/{keyID}", h.revokeDatabaseAPIKey)
 			secure.Post("/projects/{projectID}/databases/postgres", h.provisionPostgres)
 			secure.Patch("/projects/{projectID}/databases/{databaseID}", h.updateProjectDatabase)
 			secure.Get("/projects/{projectID}/databases/{databaseID}/schema", h.getSchema)
@@ -76,7 +77,6 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Delete("/projects/{projectID}/databases/{databaseID}", h.removeProvisionedPostgres)
 			secure.Delete("/projects/{projectID}", h.deleteProject)
 			secure.Post("/projects/{projectID}/reset", h.resetProject)
-			secure.Get("/projects/{projectID}/connection", h.projectConnection)
 			secure.Get("/projects/{projectID}/schema", h.getSchema)
 			secure.Put("/projects/{projectID}/schema", h.putSchema)
 			secure.Post("/projects/{projectID}/schema/validate", h.validateSchema)
@@ -86,7 +86,19 @@ func (h *Handler) Router(staticDir string) http.Handler {
 			secure.Get("/projects/{projectID}/tables", h.listTables)
 			secure.Get("/projects/{projectID}/tables/{tableName}/columns", h.listColumns)
 			secure.Get("/projects/{projectID}/tables/{tableName}/rows", h.listRows)
+			secure.Get("/tables/{tableID}/columns", h.listDraftTableColumns)
+			secure.Post("/tables/{tableID}/columns", h.createDraftTableColumn)
+			secure.Patch("/tables/{tableID}/columns/{columnID}", h.updateDraftTableColumn)
+			secure.Delete("/tables/{tableID}/columns/{columnID}", h.deleteDraftTableColumn)
 		})
+	})
+
+	r.Route("/data", func(data chi.Router) {
+		data.Get("/{table}", h.listDataRows)
+		data.Post("/{table}", h.insertDataRow)
+		data.Get("/{table}/{id}", h.getDataRow)
+		data.Patch("/{table}/{id}", h.updateDataRow)
+		data.Delete("/{table}/{id}", h.deleteDataRow)
 	})
 
 	r.Route("/api/admin", func(adminRouter chi.Router) {
@@ -398,38 +410,6 @@ func (h *Handler) resetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (h *Handler) projectConnection(w http.ResponseWriter, r *http.Request) {
-	session, ok := auth.SessionFromContext(r.Context())
-	if !ok {
-		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
-		return
-	}
-	connection, err := h.projects.Connection(r.Context(), session.UserID, chi.URLParam(r, "projectID"))
-	if err != nil {
-		Error(w, http.StatusBadRequest, "connection_failed", err.Error(), nil)
-		return
-	}
-	JSON(w, http.StatusOK, connection)
-}
-
-func (h *Handler) databaseCredentials(w http.ResponseWriter, r *http.Request) {
-	session, ok := auth.SessionFromContext(r.Context())
-	if !ok {
-		Error(w, http.StatusUnauthorized, "unauthorized", "unauthorized", nil)
-		return
-	}
-	credentials, err := h.projects.DatabaseCredentials(r.Context(), session.UserID, chi.URLParam(r, "databaseID"))
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, sql.ErrNoRows) {
-			status = http.StatusNotFound
-		}
-		Error(w, status, "database_credentials_failed", err.Error(), nil)
-		return
-	}
-	JSON(w, http.StatusOK, credentials)
 }
 
 func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {

@@ -61,6 +61,26 @@ type DatabaseCredential struct {
 	CreatedAt  time.Time  `json:"createdAt"`
 }
 
+type DatabaseAPIKey struct {
+	ID         string     `json:"id"`
+	DatabaseID string     `json:"databaseId"`
+	Name       string     `json:"name"`
+	KeyHash    string     `json:"-"`
+	KeyPrefix  string     `json:"keyPrefix"`
+	Permission string     `json:"permission"`
+	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+}
+
+type DatabaseAPIKeySecret struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Key        string    `json:"key"`
+	KeyPrefix  string    `json:"keyPrefix"`
+	Permission string    `json:"permission"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
 type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
@@ -117,27 +137,6 @@ type AdminOverview struct {
 	ActiveDatabaseServers int `json:"active_database_servers"`
 }
 
-type ProjectConnection struct {
-	Host       string `json:"host"`
-	Port       int    `json:"port"`
-	Database   string `json:"database"`
-	Username   string `json:"username"`
-	Password   string `json:"password,omitempty"`
-	SSLMode    string `json:"sslMode"`
-	DSN        string `json:"dsn"`
-	EnvExample string `json:"envExample"`
-}
-
-type DatabaseCredentialsView struct {
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Database    string `json:"database"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	SSLMode     string `json:"sslMode"`
-	DatabaseURL string `json:"databaseUrl"`
-}
-
 type SchemaRevision struct {
 	ID            string          `json:"id"`
 	ProjectID     string          `json:"projectId"`
@@ -190,6 +189,18 @@ type ColumnBlueprint struct {
 	Nullable   bool          `json:"nullable"`
 	Default    *DefaultValue `json:"default"`
 	Config     ColumnConfig  `json:"config"`
+}
+
+type DraftTableColumn struct {
+	ID           string    `json:"id"`
+	TableID      string    `json:"tableId"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	Nullable     bool      `json:"nullable"`
+	PrimaryKey   bool      `json:"primaryKey"`
+	DefaultValue string    `json:"defaultValue"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type DefaultValue struct {

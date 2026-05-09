@@ -70,6 +70,26 @@ func (s *stubPostgres) ListRows(context.Context, types.Project, string, string, 
 	return types.TableRows{}, nil
 }
 
+func (s *stubPostgres) ListDataRows(context.Context, types.Project, string, string, int) (types.TableRows, error) {
+	return types.TableRows{}, nil
+}
+
+func (s *stubPostgres) GetDataRow(context.Context, types.Project, string, string, string) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+
+func (s *stubPostgres) InsertDataRow(context.Context, types.Project, string, string, map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+
+func (s *stubPostgres) UpdateDataRow(context.Context, types.Project, string, string, string, map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+
+func (s *stubPostgres) DeleteDataRow(context.Context, types.Project, string, string, string) error {
+	return nil
+}
+
 func TestNormalUserCannotCreateSecondProject(t *testing.T) {
 	service := newTestService(t, map[string]types.User{
 		"user-1": {ID: "user-1", Role: types.UserRoleUser},
@@ -146,7 +166,7 @@ func TestAdminCanExceedBothLimits(t *testing.T) {
 	}
 }
 
-func TestProvisionPostgresCreatesMainCredentialAndReturnsDatabaseURL(t *testing.T) {
+func TestProvisionPostgresCreatesMainCredential(t *testing.T) {
 	service := newTestService(t, map[string]types.User{
 		"user-1": {ID: "user-1", Role: types.UserRoleUser},
 	})
@@ -172,21 +192,6 @@ func TestProvisionPostgresCreatesMainCredentialAndReturnsDatabaseURL(t *testing.
 	}
 	if credential.Username != database.PGRoleName {
 		t.Fatalf("credential.Username = %q, want %q", credential.Username, database.PGRoleName)
-	}
-
-	view, err := service.DatabaseCredentials(ctx, "user-1", database.ID)
-	if err != nil {
-		t.Fatalf("DatabaseCredentials() error = %v", err)
-	}
-	if view.Username != database.PGRoleName {
-		t.Fatalf("view.Username = %q, want %q", view.Username, database.PGRoleName)
-	}
-	if view.Database != database.PGDatabaseName {
-		t.Fatalf("view.Database = %q, want %q", view.Database, database.PGDatabaseName)
-	}
-	wantPrefix := "postgres://"
-	if len(view.DatabaseURL) <= len(wantPrefix) || view.DatabaseURL[:len(wantPrefix)] != wantPrefix {
-		t.Fatalf("view.DatabaseURL = %q, want postgres:// prefix", view.DatabaseURL)
 	}
 }
 
